@@ -79,6 +79,9 @@ pub struct Schema {
     #[serde(rename = "oneOf", skip_serializing_if = "Option::is_none")]
     pub one_of: Option<Vec<Schema>>,
 
+    #[serde(rename = "allOf", skip_serializing_if = "Option::is_none")]
+    pub all_of: Option<Vec<Schema>>,
+
     #[serde(rename = "$anchor", skip_serializing_if = "Option::is_none")]
     pub anchor: Option<String>,
 
@@ -90,6 +93,36 @@ pub struct Schema {
 
     #[serde(rename = "exclusiveMaximum", skip_serializing_if = "Option::is_none")]
     pub exlusive_maximum: Option<BooleanOrIntegerOrNumber>,
+
+    #[serde(rename = "patternProperties", skip_serializing_if = "Option::is_none")]
+    pub pattern_properties: Option<HashMap<String, Schema>>,
+
+    #[serde(
+        rename = "additionalProperties",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub additional_properties: Option<BooleanOrSchema>,
+
+    #[serde(
+        rename = "unevaluatedProperties",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unevaluated_properties: Option<BooleanOrSchema>,
+
+    #[serde(rename = "propertyNames", skip_serializing_if = "Option::is_none")]
+    pub property_names: Option<PropertyNames>,
+
+    #[serde(rename = "minProperties", skip_serializing_if = "Option::is_none")]
+    pub min_properties: Option<i64>,
+
+    #[serde(rename = "maxProperties", skip_serializing_if = "Option::is_none")]
+    pub max_properties: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PropertyNames {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -380,6 +413,205 @@ mod tests {
                         "type": "string",
                         "pattern": "^[A-Z]{3}-\\d{3}$"
                     }
+                }
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/object#required
+    #[test]
+    fn required_properties_example() {
+        let json_string = r##"{
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "email": { "type": "string" },
+                    "address": { "type": "string" },
+                    "telephone": { "type": "string" }
+                },
+                "required": ["name", "email"]
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/object#propertyNames
+    #[test]
+    fn property_names_example() {
+        let json_string = r##"{
+                "type": "object",
+                "propertyNames": {
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                }
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/object#size
+    #[test]
+    fn size_example() {
+        let json_string = r##"{
+                "type": "object",
+                "minProperties": 2,
+                "maxProperties": 3
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/object#additionalproperties
+    #[test]
+    fn additional_properties_example() {
+        let boolean_json_string = r##"{
+                "type": "object",
+                "properties": {
+                    "number": { "type": "number" },
+                    "street_name": { "type": "string" },
+                    "street_type": { "enum": ["Street", "Avenue", "Boulevard"] }
+                },
+                "additionalProperties": false
+            }"##;
+
+        let complex_json_string = r##"{
+                "type": "object",
+                "properties": {
+                    "number": { "type": "number" },
+                    "street_name": { "type": "string" },
+                    "street_type": { "enum": ["Street", "Avenue", "Boulevard"] }
+                },
+                "additionalProperties": { "type": "string" }
+            }"##;
+
+        let combined_json_string = r##"{
+                "type": "object",
+                "properties": {
+                    "builtin": { "type": "number" }
+                },
+                "patternProperties": {
+                    "^S_": { "type": "string" },
+                    "^I_": { "type": "integer" }
+                },
+                "additionalProperties": { "type": "string" }
+            }"##;
+
+        let boolean_deserialized: Schema = serde_json::from_str(boolean_json_string).unwrap();
+        let boolean_actual_value: serde_json::Value =
+            serde_json::to_value(boolean_deserialized).unwrap();
+        let boolean_expected_value: serde_json::Value =
+            serde_json::from_str(boolean_json_string).unwrap();
+
+        assert_eq!(boolean_actual_value, boolean_expected_value);
+
+        let complex_deserialized: Schema = serde_json::from_str(complex_json_string).unwrap();
+        let complex_actual_value: serde_json::Value =
+            serde_json::to_value(complex_deserialized).unwrap();
+        let complex_expected_value: serde_json::Value =
+            serde_json::from_str(complex_json_string).unwrap();
+
+        assert_eq!(complex_actual_value, complex_expected_value);
+
+        let combined_deserialized: Schema = serde_json::from_str(combined_json_string).unwrap();
+        let combined_actual_value: serde_json::Value =
+            serde_json::to_value(combined_deserialized).unwrap();
+        let combined_expected_value: serde_json::Value =
+            serde_json::from_str(combined_json_string).unwrap();
+
+        assert_eq!(combined_actual_value, combined_expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/object#unevaluatedproperties
+    #[test]
+    fn unevaluated_properties_example() {
+        let efficient_json_string = r##"{
+                "allOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "street_address": { "type": "string" },
+                            "city": { "type": "string" },
+                            "state": { "type": "string" }
+                        },
+                        "required": ["street_address", "city", "state"]
+                    }
+                ],
+                "properties": {
+                    "type": { "enum": ["residential", "business"] }
+                },
+                "required": ["type"],
+                "unevaluatedProperties": false
+            }"##;
+
+        let complex_json_string = r##"{
+                "type": "object",
+                "properties": {
+                    "street_address": { "type": "string" },
+                    "city": { "type": "string" },
+                    "state": { "type": "string" },
+                    "type": { "enum": ["residential", "business"] }
+                },
+                "required": ["street_address", "city", "state", "type"],
+                "if": {
+                    "type": "object",
+                    "properties": {
+                        "type": { "const": "business" }
+                    },
+                    "required": ["type"]
+                },
+                "then": {
+                    "properties": {
+                        "department": { "type": "string" }
+                    }
+                },
+                "unevaluatedProperties": false
+            }"##;
+
+        let efficient_deserialized: Schema = serde_json::from_str(efficient_json_string).unwrap();
+        let efficient_actual_value: serde_json::Value =
+            serde_json::to_value(efficient_deserialized).unwrap();
+        let efficient_expected_value: serde_json::Value =
+            serde_json::from_str(efficient_json_string).unwrap();
+
+        assert_eq!(efficient_actual_value, efficient_expected_value);
+
+        let complex_deserialized: Schema = serde_json::from_str(complex_json_string).unwrap();
+        let complex_actual_value: serde_json::Value =
+            serde_json::to_value(complex_deserialized).unwrap();
+        let complex_expected_value: serde_json::Value =
+            serde_json::from_str(complex_json_string).unwrap();
+
+        assert_eq!(complex_actual_value, complex_expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/object#patternProperties
+    #[test]
+    fn pattern_properties_example() {
+        let json_string = r##"{
+                "type": "object",
+                "patternProperties": {
+                    "^S_": { "type": "string" },
+                    "^I_": { "type": "integer" }
                 }
             }"##;
 
