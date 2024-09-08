@@ -34,7 +34,8 @@ fn resolve_dictonary_schemas_if_available(
             if let Some(reference) = &value.reference {
                 let schema = *registry.get(reference).expect(reference);
                 let schema = schema.clone();
-                let resolved_schema = resolve(schema.clone(), registry);
+                let mut resolved_schema = resolve(schema.clone(), registry);
+                resolved_schema.anchor = None;
                 *value = resolved_schema;
             } else {
                 *value = resolve(value.clone(), registry);
@@ -51,7 +52,8 @@ fn resolve_inner_schema_if_available(
         if let Some(reference) = &items.reference {
             let schema = *registry.get(reference).expect(reference);
             let schema = schema.clone();
-            let resolved_schema = resolve(schema.clone(), registry);
+            let mut resolved_schema = resolve(schema.clone(), registry);
+            resolved_schema.anchor = None;
             *items = Box::new(resolved_schema);
         };
     };
@@ -65,7 +67,8 @@ fn resolve_sub_schema_if_available(
         if let Some(reference) = &schema.reference {
             let registry_schema = *registry.get(reference).expect(reference);
             let registry_schema = registry_schema.clone();
-            let resolved_registry_schema = resolve(registry_schema.clone(), registry);
+            let mut resolved_registry_schema = resolve(registry_schema.clone(), registry);
+            resolved_registry_schema.anchor = None;
             *schema = Box::new(resolved_registry_schema);
         }
     }
@@ -85,6 +88,12 @@ fn populate_existing_schema_registry<'a>(
         for (name, schema) in definitions {
             let current_path = current_path.clone();
             let path = format!("{current_path}/$defs/{name}");
+
+            if let Some(anchor) = &schema.anchor {
+                let anchor = format!("#{anchor}");
+                registry.insert(anchor, schema);
+            }
+
             registry.insert(path, schema);
             registry = populate_existing_schema_registry(registry, schema, current_path);
         }
@@ -181,6 +190,76 @@ mod tests {
                             "veggieLike": {
                                 "type": "boolean",
                                 "description": "Do I like this vegetable?"
+                            }
+                        }
+                    }
+                }
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(input_json_string).unwrap();
+        let dereferenced = dereference(deserialized);
+
+        let actual_value: serde_json::Value = serde_json::to_value(dereferenced).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(output_json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/learn/json-schema-examples#ecommerce-system
+    #[test]
+    fn ecommerce_system_example() {
+        let input_json_string = r##"{
+                "$id": "https://example.com/ecommerce.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$defs": {
+                    "product": {
+                        "$anchor": "ProductSchema",
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "price": { "type": "number", "minimum": 0 }
+                        }
+                    },
+                    "order": {
+                        "$anchor": "OrderSchema",
+                        "type": "object",
+                        "properties": {
+                            "orderId": { "type": "string" },
+                            "items": {
+                                "type": "array",
+                                "items": { "$ref": "#ProductSchema" }
+                            }
+                        }
+                    }
+                }
+            }"##;
+
+        let output_json_string = r##"{
+                "$id": "https://example.com/ecommerce.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$defs": {
+                    "product": {
+                        "$anchor": "ProductSchema",
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "price": { "type": "number", "minimum": 0 }
+                        }
+                    },
+                    "order": {
+                        "$anchor": "OrderSchema",
+                        "type": "object",
+                        "properties": {
+                            "orderId": { "type": "string" },
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": { "type": "string" },
+                                        "price": { "type": "number", "minimum": 0 }
+                                    }
+                                }
                             }
                         }
                     }
