@@ -117,6 +117,30 @@ pub struct Schema {
 
     #[serde(rename = "maxProperties", skip_serializing_if = "Option::is_none")]
     pub max_properties: Option<i64>,
+
+    #[serde(rename = "prefixItems", skip_serializing_if = "Option::is_none")]
+    pub prefix_items: Option<Vec<Schema>>,
+
+    #[serde(rename = "unevaluatedItems", skip_serializing_if = "Option::is_none")]
+    pub unevaluated_items: Option<BooleanOrSchema>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contains: Option<BooleanOrSchema>,
+
+    #[serde(rename = "minContains", skip_serializing_if = "Option::is_none")]
+    pub min_contains: Option<i64>,
+
+    #[serde(rename = "maxContains", skip_serializing_if = "Option::is_none")]
+    pub max_contains: Option<i64>,
+
+    #[serde(rename = "minItems", skip_serializing_if = "Option::is_none")]
+    pub min_items: Option<i64>,
+
+    #[serde(rename = "maxItems", skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<i64>,
+
+    #[serde(rename = "uniqueItems", skip_serializing_if = "Option::is_none")]
+    pub unique_items: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -617,6 +641,153 @@ mod tests {
 
         let deserialized: Schema = serde_json::from_str(json_string).unwrap();
 
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/array#tupleValidation
+    #[test]
+    fn tuple_validation_example() {
+        let json_string = r##"{
+                "type": "array",
+                "prefixItems": [
+                    { "type": "number" },
+                    { "type": "string" },
+                    { "enum": ["Street", "Avenue", "Boulevard"] },
+                    { "enum": ["NW", "NE", "SW", "SE"] }
+                ]
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/object#unevaluatedproperties
+    #[test]
+    fn additional_items_example() {
+        let boolean_json_string = r##"{
+                "type": "array",
+                "prefixItems": [
+                    { "type": "number" },
+                    { "type": "string" },
+                    { "enum": ["Street", "Avenue", "Boulevard"] },
+                    { "enum": ["NW", "NE", "SW", "SE"] }
+                ],
+                "items": false
+            }"##;
+
+        let complex_json_string = r##"{
+                "type": "array",
+                "prefixItems": [
+                    { "type": "number" },
+                    { "type": "string" },
+                    { "enum": ["Street", "Avenue", "Boulevard"] },
+                    { "enum": ["NW", "NE", "SW", "SE"] }
+                ],
+                "items": { "type": "string" }
+            }"##;
+
+        let boolean_deserialized: Schema = serde_json::from_str(boolean_json_string).unwrap();
+        let boolean_actual_value: serde_json::Value =
+            serde_json::to_value(boolean_deserialized).unwrap();
+        let boolean_expected_value: serde_json::Value =
+            serde_json::from_str(boolean_json_string).unwrap();
+
+        assert_eq!(boolean_actual_value, boolean_expected_value);
+
+        let complex_deserialized: Schema = serde_json::from_str(complex_json_string).unwrap();
+        let complex_actual_value: serde_json::Value =
+            serde_json::to_value(complex_deserialized).unwrap();
+        let complex_expected_value: serde_json::Value =
+            serde_json::from_str(complex_json_string).unwrap();
+
+        assert_eq!(complex_actual_value, complex_expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/array#unevaluateditems
+    #[test]
+    fn unevaluated_items_example() {
+        let json_string = r##"{
+                "prefixItems": [
+                    { "type": "string" }, { "type": "number" }
+                ],
+                "unevaluatedItems": false
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/array#contains
+    #[test]
+    fn contains_example() {
+        let json_string = r##"{
+                "type": "array",
+                "contains": {
+                    "type": "number"
+                }
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/array#mincontains-maxcontains
+    #[test]
+    fn mincontains_maxcontains_example() {
+        let json_string = r##"{
+                "type": "array",
+                "contains": {
+                    "type": "number"
+                },
+                "minContains": 2,
+                "maxContains": 3
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/array#length
+    #[test]
+    fn array_length_example() {
+        let json_string = r##"{
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 3
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/array#uniqueItems
+    #[test]
+    fn uniqueness_example() {
+        let json_string = r##"{
+                "type": "array",
+                "uniqueItems": true
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
         let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
         let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
 
