@@ -82,6 +82,12 @@ pub struct Schema {
     #[serde(rename = "allOf", skip_serializing_if = "Option::is_none")]
     pub all_of: Option<Vec<Schema>>,
 
+    #[serde(rename = "anyOf", skip_serializing_if = "Option::is_none")]
+    pub any_of: Option<Vec<Schema>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub not: Option<Box<Schema>>,
+
     #[serde(rename = "$anchor", skip_serializing_if = "Option::is_none")]
     pub anchor: Option<String>,
 
@@ -141,6 +147,30 @@ pub struct Schema {
 
     #[serde(rename = "uniqueItems", skip_serializing_if = "Option::is_none")]
     pub unique_items: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<AnyType>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub examples: Option<Vec<AnyType>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<bool>,
+
+    #[serde(rename = "readOnly", skip_serializing_if = "Option::is_none")]
+    pub read_only: Option<bool>,
+
+    #[serde(rename = "writeOnly", skip_serializing_if = "Option::is_none")]
+    pub write_only: Option<bool>,
+
+    #[serde(rename = "$comment", skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+
+    #[serde(rename = "contentEncoding", skip_serializing_if = "Option::is_none")]
+    pub content_encoding: Option<String>,
+
+    #[serde(rename = "contentMediaType", skip_serializing_if = "Option::is_none")]
+    pub content_media_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -786,6 +816,140 @@ mod tests {
                 "type": "array",
                 "uniqueItems": true
             }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/null
+    #[test]
+    fn null_example() {
+        let json_string = r##"{ "type": "null" }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/annotations#annotations
+    #[test]
+    fn annotations_example() {
+        let json_string = r##"{
+                "title": "Match anything",
+                "description": "This is a schema that matches anything.",
+                "default": "Default value",
+                "examples": [
+                    "Anything",
+                    4035
+                ],
+                "deprecated": true,
+                "readOnly": true,
+                "writeOnly": false
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/comments#comments
+    #[test]
+    fn comments_example() {
+        let json_string = r##"{
+                "$comment": "Created by John Doe",
+                "type": "object",
+                "properties": {
+                    "country": {
+                    "$comment": "TODO: add enum of countries"
+                    }
+                }
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/non_json_data#media:-string-encoding-non-json-data
+    #[test]
+    fn media_example() {
+        let json_string = r##"{
+                "type": "string",
+                "contentEncoding": "base64",
+                "contentMediaType": "image/png"
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/combining#allOf
+    #[test]
+    fn all_of_example() {
+        let json_string = r##"{
+                "allOf": [
+                    { "type": "string" },
+                    { "maxLength": 5 }
+                ]
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/combining#anyOf
+    #[test]
+    fn any_of_example() {
+        let json_string = r##"{
+                "anyOf": [
+                    { "type": "string", "maxLength": 5 },
+                    { "type": "number", "minimum": 0 }
+                ]
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/combining#oneOf
+    #[test]
+    fn one_of_example() {
+        let json_string = r##"{
+                "oneOf": [
+                    { "type": "number", "multipleOf": 5 },
+                    { "type": "number", "multipleOf": 3 }
+                ]
+            }"##;
+
+        let deserialized: Schema = serde_json::from_str(json_string).unwrap();
+        let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
+        let expected_value: serde_json::Value = serde_json::from_str(json_string).unwrap();
+
+        assert_eq!(actual_value, expected_value);
+    }
+
+    /// https://json-schema.org/understanding-json-schema/reference/combining#not
+    #[test]
+    fn not_example() {
+        let json_string = r##"{ "not": { "type": "string" } }"##;
 
         let deserialized: Schema = serde_json::from_str(json_string).unwrap();
         let actual_value: serde_json::Value = serde_json::to_value(deserialized).unwrap();
