@@ -1,0 +1,8 @@
+[package]
+name = "schema_registry"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json_schema = { path = "../serde_json_schema" }
+schema_discovery = { path = "../schema_discovery" }
