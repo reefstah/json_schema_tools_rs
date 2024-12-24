@@ -2,6 +2,11 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+pub const DEFINITIONS_PATH: &str = "$defs";
+pub const PROPERTIES_PATH: &str = "properties";
+pub const DEPENDENT_SCHEMAS_PATH: &str = "dependentSchemas";
+pub const PATTERN_PROPERTIES_PATH: &str = "patternProperties";
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Schema {
     #[serde(rename = "$id", skip_serializing_if = "Option::is_none")]

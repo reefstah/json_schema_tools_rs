@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["dereference_json_schema", "serde_json_schema"]
+members = ["dereference_json_schema", "serde_json_schema", "schema_discovery"]
