@@ -57,24 +57,33 @@ impl<'a> SchemaDiscoverer<'a> {
     }
 }
 
+impl<'a> From<PathableSchema<'a>> for DiscoveredSchema<'a> {
+    fn from(value: PathableSchema<'a>) -> Self {
+        DiscoveredSchema {
+            id: value.path,
+            schema: value.schema,
+        }
+    }
+}
+
 impl<'a> Iterator for SchemaDiscoverer<'a> {
-    type Item = PathableSchema<'a>;
+    type Item = DiscoveredSchema<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(iter) = &mut self.discovering {
-            if let Some(i) = iter.next() {
-                return Some(i);
+            if let Some(p) = iter.next() {
+                return Some(p.into());
             }
         }
 
         let i = self.iter.next();
         self.discovering = i.clone().map(|pathable_schema| pathable_schema.into_iter());
-        i
+        i.map(|p| p.into())
     }
 }
 
 #[derive(Clone)]
-pub struct PathableSchema<'a> {
+struct PathableSchema<'a> {
     root_path: String,
     path: String,
     schema: &'a Schema,
