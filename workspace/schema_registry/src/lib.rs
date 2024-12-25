@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter};
+use std::collections::HashMap;
 
 use schema_discovery::SchemaDiscoverable;
 use serde_json_schema::Schema;
@@ -8,21 +8,20 @@ pub enum SchemaRegistryIngestionError {
     SchemaAlreadyExistsInRegistry,
 }
 
-pub enum SchemaDiscoveryError {
+pub enum SchemaRegistryDiscoveryError {
     EncounteredDuplicateSchema,
 }
 
 #[derive(Default)]
-pub struct SchemaRegistry<'a> {
+pub struct SchemaRegistry {
     discovered_schemas: HashMap<String, Schema>,
-    schemas: HashMap<String, &'a Schema>,
-    owned_schemas: HashMap<String, Schema>,
+    schemas: HashMap<String, Schema>,
 }
 
-impl<'a> SchemaRegistry<'a> {
+impl SchemaRegistry {
     pub fn add_internally_identified_schema(
         mut self,
-        schema: &'a Schema,
+        schema: Schema,
     ) -> Result<Self, SchemaRegistryIngestionError> {
         let id = schema
             .id
@@ -46,28 +45,20 @@ impl<'a> SchemaRegistry<'a> {
             return Err(SchemaRegistryIngestionError::SchemaAlreadyExistsInRegistry);
         }
 
-        let mut schema = schema;
-        schema.id = Some(external_id.clone());
-
-        self.owned_schemas.insert(external_id, schema);
+        self.schemas.insert(external_id, schema);
         Ok(self)
     }
 
-    pub fn discover(mut self) -> Result<Self, SchemaDiscoveryError> {
-        let result: Vec<(String, Schema)> = iter::empty()
-            .chain(self.schemas.values().copied())
-            .chain(self.owned_schemas.values())
-            .flat_map(|schema| {
-                schema
-                    .discover()
-                    .map(|d| (d.id().to_owned(), d.schema().clone()))
-                    .collect::<Vec<(String, Schema)>>()
-            })
-            .collect();
+    pub fn discover(mut self) -> Result<Self, SchemaRegistryDiscoveryError> {
+        let iter = self.schemas.values().flat_map(|schema| {
+            schema
+                .discover()
+                .map(|d| (d.id().to_string(), d.schema().clone()))
+        });
 
-        for (id, schema) in result {
+        for (id, schema) in iter {
             if self.schema_exists(&id) {
-                return Err(SchemaDiscoveryError::EncounteredDuplicateSchema);
+                return Err(SchemaRegistryDiscoveryError::EncounteredDuplicateSchema);
             }
 
             self.discovered_schemas.insert(id, schema);
@@ -77,8 +68,6 @@ impl<'a> SchemaRegistry<'a> {
     }
 
     fn schema_exists(&self, id: &str) -> bool {
-        self.schemas.contains_key(id)
-            || self.owned_schemas.contains_key(id)
-            || self.discovered_schemas.contains_key(id)
+        self.schemas.contains_key(id) || self.discovered_schemas.contains_key(id)
     }
 }

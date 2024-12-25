@@ -8,6 +8,12 @@ pub trait SchemaDiscoverable {
     fn discover(&self) -> SchemaDiscoverer;
 }
 
+impl SchemaDiscoverable for Schema {
+    fn discover(&self) -> SchemaDiscoverer {
+        SchemaDiscoverer::new(self)
+    }
+}
+
 impl SchemaDiscoverable for &Schema {
     fn discover(&self) -> SchemaDiscoverer {
         SchemaDiscoverer::new(self)
