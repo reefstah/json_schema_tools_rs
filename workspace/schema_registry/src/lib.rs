@@ -19,8 +19,9 @@ impl SchemaRegistry {
         schema: Schema,
     ) -> Result<Self, SchemaRegistryIngestionError> {
         let id = schema
-            .id
+            .dollar_id
             .clone()
+            .or(schema.id.clone())
             .ok_or(SchemaRegistryIngestionError::NoInternalIdentifier)?;
 
         if self.schema_exists(&id) {

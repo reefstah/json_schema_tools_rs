@@ -42,11 +42,11 @@ pub struct SchemaDiscoverer<'a> {
 
 impl<'a> SchemaDiscoverer<'a> {
     fn new(schema: &'a Schema) -> Self {
-        match &schema.id {
+        match schema.dollar_id.to_owned().or(schema.id.to_owned()) {
             Some(id) => {
                 let pathable_schema = PathableSchema {
-                    root_path: id.to_string(),
-                    path: id.to_string(),
+                    root_path: id.clone(),
+                    path: id,
                     schema,
                 };
 
