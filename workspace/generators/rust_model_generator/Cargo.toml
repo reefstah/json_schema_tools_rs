@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 serde_json_schema = { path = "../../serde_json_schema" }
-schema_registry = { path = "../../schema_registry" }
 quote = "1.0.38"
 anyhow = "1.0.95"
 proc-macro2 = "1.0.92"

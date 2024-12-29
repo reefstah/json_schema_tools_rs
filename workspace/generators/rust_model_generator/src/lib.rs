@@ -1,30 +1,25 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
+use std::iter;
 
 use anyhow::Result;
 
 use proc_macro2::TokenStream;
 use proc_macro2::{Ident, Span};
 use quote::quote;
-use schema_registry::SchemaRegistry;
 use serde_json_schema::Schema;
 use serde_json_schema::StringOrStringArray;
 
 // TODO external schemas
 // TODO rustify fieldnames
-pub fn generate(root_model_name: String, schema: Schema) -> Result<String> {
-    // let out_dir = env::var_os("OUT_DIR").unwrap();
-    // let file_name = format!("{}.rs", root_model_name);
-    // let dest_path = Path::new(&out_dir).join(file_name);
-
-    let _registry = SchemaRegistry::new()
-        .add_internally_identified_schema(schema.clone())?
-        .discover()?;
-
+// TODO validation>?
+pub fn generate(schema: Schema) -> Result<String> {
     let type_mapping = TypeMapping::with_basic_types();
-
-    let name = Ident::new(&root_model_name, Span::call_site());
+    let name = schema
+        .title
+        .ok_or(GeneratorError::RootSchemaIsMissingATitle)?;
+    let name = Ident::new(&name, Span::call_site());
 
     let mut fields: Vec<(&String, &Schema)> = schema.properties.inner_iter().collect();
     fields.sort_by(|a, b| String::cmp(a.0, b.0));
@@ -53,8 +48,10 @@ pub fn generate(root_model_name: String, schema: Schema) -> Result<String> {
 
             let field_name = Ident::new(field_name, name.span());
             let field_type = Ident::new(field_type, name.span());
+            let docs = schema.description.iter().map(|d| quote! {#[doc = #d]});
 
             let token_stream = quote! {
+                #(#docs)*
                 #field_name: #field_type
             };
 
@@ -62,7 +59,15 @@ pub fn generate(root_model_name: String, schema: Schema) -> Result<String> {
         })
         .collect::<Result<Vec<TokenStream>>>()?;
 
+    let docs = iter::empty()
+        .chain(schema.dollar_id.iter())
+        .chain(schema.id.iter())
+        .chain(schema.description.iter())
+        .map(|s| s.to_owned())
+        .map(|s| quote! {#[doc = #s]});
+
     let file_contents = quote! {
+        #(#docs)*
         struct #name {
             #(#fields),*
         }
@@ -76,6 +81,7 @@ pub fn generate(root_model_name: String, schema: Schema) -> Result<String> {
 
 #[derive(Debug)]
 pub enum GeneratorError {
+    RootSchemaIsMissingATitle,
     PropertyMissingTypeForField(String),
     NoTypeMappingFoundForField(String),
 }
@@ -103,8 +109,8 @@ impl TypeMapping {
     pub fn with_basic_types() -> Self {
         Self::empty()
             .add("string", "String")
-            .add("number", "u32")
-            .add("integer", "u32")
+            .add("number", "f64")
+            .add("integer", "i64")
             .add("boolean", "bool")
     }
 
@@ -134,45 +140,43 @@ mod tests {
 
     use super::*;
 
+    /// https://json-schema.org/learn/miscellaneous-examples#basic
     #[test]
-    fn it_works() {
+    fn basic_example() {
         let json_string = r##"{
-                "$id": "https://example.com/user-profile.schema.json",
+                "$id": "https://example.com/person.schema.json",
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "description": "A representation of a user profile",
+                "title": "Person",
                 "type": "object",
-                "required": ["username", "email"],
                 "properties": {
-                    "username": {
-                        "type": "string"
-                    },
-                    "email": {
+                    "firstName": {
                         "type": "string",
-                        "format": "email"
+                        "description": "The person's first name."
                     },
-                    "fullName": {
-                        "type": "string"
+                    "lastName": {
+                        "type": "string",
+                        "description": "The person's last name."
                     },
                     "age": {
+                        "description": "Age in years which must be equal to or greater than zero.",
                         "type": "integer",
                         "minimum": 0
-                    },
-                    "location": {
-                        "type": "string"
                     }
                 }
             }"##;
 
         let schema: Schema = serde_json::from_str(json_string).unwrap();
-        let result = generate("UserProfile".to_owned(), schema).unwrap();
+        let result = generate(schema).unwrap();
 
         let file_contents = r##"
-            struct UserProfile {
-                age: u32,
-                email: String,
-                fullName: String,
-                location: String,
-                username: String,
+            ///https://example.com/person.schema.json
+            struct Person {
+                ///Age in years which must be equal to or greater than zero.
+                age: i64,
+                ///The person's first name.
+                firstName: String,
+                ///The person's last name.
+                lastName: String,
             }
         "##;
 
