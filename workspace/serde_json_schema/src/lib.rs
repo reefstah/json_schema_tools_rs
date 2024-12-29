@@ -43,7 +43,7 @@ pub struct Schema {
     pub definitions: Option<HashMap<String, Schema>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub required: Option<StringOrStringArray>,
+    pub required: Option<Vec<String>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<BooleanOrSchema>,
@@ -1142,7 +1142,7 @@ mod tests {
                 "description": "An address similar to http://microformats.org/wiki/h-card",
                 "type": "object",
                 "properties": {
-                        "postOfficeBox": {
+                    "postOfficeBox": {
                         "type": "string"
                     },
                     "extendedAddress": {
