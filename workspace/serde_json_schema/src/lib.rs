@@ -366,17 +366,17 @@ mod tests {
                 "type": "object",
                 "properties": {
                     "firstName": {
-                    "type": "string",
-                    "description": "The person's first name."
+                        "type": "string",
+                        "description": "The person's first name."
                     },
                     "lastName": {
-                    "type": "string",
-                    "description": "The person's last name."
+                        "type": "string",
+                        "description": "The person's last name."
                     },
                     "age": {
-                    "description": "Age in years which must be equal to or greater than zero.",
-                    "type": "integer",
-                    "minimum": 0
+                        "description": "Age in years which must be equal to or greater than zero.",
+                        "type": "integer",
+                        "minimum": 0
                     }
                 }
             }"#;
@@ -400,14 +400,14 @@ mod tests {
                 "type": "object",
                 "properties": {
                     "fruits": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
                     },
-                    "vegetables": {
-                    "type": "array",
-                    "items": { "$ref": "#/$defs/veggie" }
+                        "vegetables": {
+                        "type": "array",
+                        "items": { "$ref": "#/$defs/veggie" }
                     }
                 },
                 "$defs": {
@@ -416,12 +416,12 @@ mod tests {
                         "required": [ "veggieName", "veggieLike" ],
                         "properties": {
                             "veggieName": {
-                            "type": "string",
-                            "description": "The name of the vegetable."
+                                "type": "string",
+                                "description": "The name of the vegetable."
                             },
                             "veggieLike": {
-                            "type": "boolean",
-                            "description": "Do I like this vegetable?"
+                                "type": "boolean",
+                                "description": "Do I like this vegetable?"
                             }
                         }
                     }
