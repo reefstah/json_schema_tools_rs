@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
 use std::iter;
@@ -11,15 +11,58 @@ use quote::quote;
 use serde_json_schema::Schema;
 use serde_json_schema::StringOrStringArray;
 
+fn capatalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first_letter) => first_letter.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
+fn get_first_resource_from_url(url: &str) -> Option<String> {
+    url.split('/').last().map(|s| s.to_owned()).map(|url_end| {
+        url_end
+            .chars()
+            .take_while(|c| *c != '.')
+            .collect::<String>()
+    })
+}
+
+fn snake_case(s: &str) -> String {
+    let mut field_name = s.chars();
+
+    let first_letters = field_name
+        .next()
+        .unwrap_or_default()
+        .to_lowercase()
+        .collect::<String>();
+
+    let rest = field_name
+        .map(|letter| match letter.is_uppercase() {
+            true => format!("_{}", letter.to_lowercase().collect::<String>()),
+            false => letter.to_string(),
+        })
+        .collect::<String>();
+
+    let field_name = first_letters + rest.as_str();
+    field_name
+}
+
 // TODO external schemas
-// TODO rustify fieldnames
 // TODO validation>?
 pub fn generate(root_schema: Schema) -> Result<String> {
     let type_mapping = TypeMapping::with_basic_types();
     let name = root_schema
         .title
-        .ok_or(GeneratorError::RootSchemaIsMissingATitle)?;
-    let name = Ident::new(&name, Span::call_site());
+        .clone()
+        .or_else(|| {
+            root_schema
+                .get_id()
+                .and_then(|url| get_first_resource_from_url(&url))
+        })
+        .map(|name| capatalize(&name))
+        .map(|name| Ident::new(&name, Span::call_site()))
+        .ok_or(GeneratorError::NoNameForRootSchema)?;
 
     let mut fields: Vec<(&String, &Schema)> = root_schema.properties.inner_iter().collect();
     fields.sort_by(|a, b| String::cmp(a.0, b.0));
@@ -37,26 +80,7 @@ pub fn generate(root_schema: Schema) -> Result<String> {
                 StringOrStringArray::Array(_) => todo!(),
             };
 
-            let first_letter = original_field_name
-                .chars()
-                .next()
-                .unwrap_or_default()
-                .to_lowercase()
-                .next()
-                .unwrap();
-
-            let mut rest = original_field_name
-                .chars()
-                .skip(1)
-                .flat_map(|letter| match letter.is_uppercase() {
-                    true => vec!['_', letter.to_lowercase().next().unwrap()],
-                    false => vec![letter],
-                })
-                .collect::<VecDeque<char>>();
-
-            rest.push_front(first_letter);
-
-            let field_name = rest.iter().collect::<String>();
+            let field_name = snake_case(original_field_name);
 
             let field_type =
                 match json_type.as_str() {
@@ -110,7 +134,7 @@ pub fn generate(root_schema: Schema) -> Result<String> {
 
 #[derive(Debug)]
 pub enum GeneratorError {
-    RootSchemaIsMissingATitle,
+    NoNameForRootSchema,
     PropertyMissingTypeForField(String),
     NoTypeMappingFoundForField(String),
 }
@@ -227,7 +251,6 @@ mod tests {
         let json_string = r##"{
                 "$id": "https://example.com/address.schema.json",
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "title": "Address",
                 "description": "An address similar to http://microformats.org/wiki/h-card",
                 "type": "object",
                 "properties": {
@@ -274,6 +297,59 @@ mod tests {
                 postal_code: Option<String>,
                 region: String,
                 street_address: Option<String>,
+            }
+        };
+
+        let syntax_tree = syn::parse2(file_contents).unwrap();
+        let expected_result = prettyplease::unparse(&syntax_tree);
+
+        assert_eq!(result, expected_result);
+    }
+
+    /// https://json-schema.org/learn/json-schema-examples#blog-post
+    #[test]
+    fn blog_post_example() {
+        let json_string = r##"{
+                "$id": "https://example.com/blog-post.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "description": "A representation of a blog post",
+                "type": "object",
+                "required": ["title", "content", "author"],
+                "properties": {
+                    "title": {
+                        "type": "string"
+                    },
+                    "content": {
+                        "type": "string"
+                    },
+                    "publishedDate": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "author": {
+                        "$ref": "https://example.com/user-profile.schema.json"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }"##;
+
+        let schema: Schema = serde_json::from_str(json_string).unwrap();
+        let result = generate(schema).unwrap();
+
+        let file_contents = quote! {
+            ///https://example.com/blog-post.schema.json
+            ///A representation of a blog post
+            struct BlogPost {
+                title: String,
+                content: String,
+                author: String,
+                publishedDate: Option<String>,
+                tags: Option<Vec<String>>,
             }
         };
 

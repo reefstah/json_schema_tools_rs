@@ -178,6 +178,12 @@ pub struct Schema {
     pub content_media_type: Option<String>,
 }
 
+impl Schema {
+    pub fn get_id(&self) -> Option<String> {
+        self.dollar_id.to_owned().or_else(|| self.id.to_owned())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PropertyNames {
     #[serde(skip_serializing_if = "Option::is_none")]
