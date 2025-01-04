@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::Display;
+use std::fmt::{format, Display};
 use std::iter;
 
 use anyhow::Result;
@@ -8,8 +8,8 @@ use anyhow::Result;
 use proc_macro2::TokenStream;
 use proc_macro2::{Ident, Span};
 use quote::quote;
-use serde_json_schema::Schema;
 use serde_json_schema::StringOrStringArray;
+use serde_json_schema::{BooleanOrSchema, Schema};
 
 fn capatalize(s: &str) -> String {
     let mut chars = s.chars();
@@ -29,23 +29,26 @@ fn get_first_resource_from_url(url: &str) -> Option<String> {
 }
 
 fn snake_case(s: &str) -> String {
-    let mut field_name = s.chars();
+    let mut chars = s.chars();
 
-    let first_letters = field_name
+    let first_letters = chars
         .next()
         .unwrap_or_default()
         .to_lowercase()
         .collect::<String>();
 
-    let rest = field_name
+    let rest = chars
         .map(|letter| match letter.is_uppercase() {
             true => format!("_{}", letter.to_lowercase().collect::<String>()),
             false => letter.to_string(),
         })
         .collect::<String>();
 
-    let field_name = first_letters + rest.as_str();
-    field_name
+    first_letters + rest.as_str()
+}
+
+fn upper_camel_case(s: &str) -> String {
+    s.split('-').map(capatalize).collect::<String>()
 }
 
 // TODO external schemas
@@ -60,7 +63,7 @@ pub fn generate(root_schema: Schema) -> Result<String> {
                 .get_id()
                 .and_then(|url| get_first_resource_from_url(&url))
         })
-        .map(|name| capatalize(&name))
+        .map(|name| upper_camel_case(&name))
         .map(|name| Ident::new(&name, Span::call_site()))
         .ok_or(GeneratorError::NoNameForRootSchema)?;
 
@@ -82,16 +85,49 @@ pub fn generate(root_schema: Schema) -> Result<String> {
 
             let field_name = snake_case(original_field_name);
 
-            let field_type =
-                match json_type.as_str() {
-                    "array" => todo!(),
-                    "null" => todo!(),
-                    other => type_mapping.get(other).ok_or(
-                        GeneratorError::NoTypeMappingFoundForField(field_name.to_owned()),
-                    )?,
-                };
+            let field_type = match json_type.as_str() {
+                "array" => {
+                    let items =
+                        schema
+                            .items
+                            .clone()
+                            .ok_or(GeneratorError::ArrayDoesNotHaveSchema(
+                                original_field_name.to_owned(),
+                            ))?;
 
-            let field_type = Ident::new(field_type, name.span());
+                    let schema = match items {
+                        BooleanOrSchema::Boolean(_) => Err(
+                            GeneratorError::ArrayDoesNotHaveSchema(original_field_name.to_owned()),
+                        )?,
+                        BooleanOrSchema::InnerSchema(schema) => schema,
+                    };
+
+                    let json_type = match schema.schema_type.clone().ok_or(
+                        GeneratorError::PropertyMissingTypeForField(original_field_name.to_owned()),
+                    )? {
+                        StringOrStringArray::String(value) => value,
+                        StringOrStringArray::Array(_) => todo!(),
+                    };
+
+                    let inner_type = type_mapping.get(&json_type).ok_or(
+                        GeneratorError::NoTypeMappingFoundForField(original_field_name.to_owned()),
+                    )?;
+
+                    let inner_type = Ident::new(inner_type, name.span());
+
+                    quote! {Vec<#inner_type>}
+                }
+                "null" => todo!(),
+                other => {
+                    let field_type = type_mapping.get(other).ok_or(
+                        GeneratorError::NoTypeMappingFoundForField(original_field_name.to_owned()),
+                    )?;
+
+                    let field_type = Ident::new(field_type, name.span());
+                    quote! {#field_type}
+                }
+            };
+
             let field_type = root_schema
                 .required
                 .inner_iter()
@@ -137,6 +173,7 @@ pub enum GeneratorError {
     NoNameForRootSchema,
     PropertyMissingTypeForField(String),
     NoTypeMappingFoundForField(String),
+    ArrayDoesNotHaveSchema(String),
 }
 
 impl Error for GeneratorError {}
@@ -297,6 +334,64 @@ mod tests {
                 postal_code: Option<String>,
                 region: String,
                 street_address: Option<String>,
+            }
+        };
+
+        let syntax_tree = syn::parse2(file_contents).unwrap();
+        let expected_result = prettyplease::unparse(&syntax_tree);
+
+        assert_eq!(result, expected_result);
+    }
+
+    /// https://json-schema.org/learn/json-schema-examples#user-profile
+    #[test]
+    fn user_profile_example() {
+        let json_string = r##"{
+                "$id": "https://example.com/user-profile.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "description": "A representation of a user profile",
+                "type": "object",
+                "required": ["username", "email"],
+                "properties": {
+                    "username": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "fullName": {
+                        "type": "string"
+                    },
+                    "age": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "location": {
+                        "type": "string"
+                    },
+                    "interests": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }"##;
+
+        let schema: Schema = serde_json::from_str(json_string).unwrap();
+        let result = generate(schema).unwrap();
+
+        let file_contents = quote! {
+            ///https://example.com/user-profile.schema.json
+            ///A representation of a user profile
+            struct UserProfile {
+                age: Option<i64>,
+                email: String,
+                full_name: Option<String>,
+                interests: Option<Vec<String>>,
+                location: Option<String>,
+                username: String,
             }
         };
 
