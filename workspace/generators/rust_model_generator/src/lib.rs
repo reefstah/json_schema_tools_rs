@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{format, Display};
+use std::fmt::Display;
 use std::iter;
 
 use anyhow::Result;
@@ -10,6 +10,10 @@ use proc_macro2::{Ident, Span};
 use quote::quote;
 use serde_json_schema::StringOrStringArray;
 use serde_json_schema::{BooleanOrSchema, Schema};
+
+// TODO external schemas
+// TODO validation>?
+// TODO schema wrapper with name or derived name and use for de-duplicate generation
 
 fn capatalize(s: &str) -> String {
     let mut chars = s.chars();
@@ -51,121 +55,238 @@ fn upper_camel_case(s: &str) -> String {
     s.split('-').map(capatalize).collect::<String>()
 }
 
-// TODO external schemas
-// TODO validation>?
-pub fn generate(root_schema: Schema) -> Result<String> {
-    let type_mapping = TypeMapping::with_basic_types();
-    let name = root_schema
+fn struct_name(schema: &Schema) -> Option<String> {
+    schema
         .title
         .clone()
         .or_else(|| {
-            root_schema
+            schema
                 .get_id()
                 .and_then(|url| get_first_resource_from_url(&url))
         })
         .map(|name| upper_camel_case(&name))
-        .map(|name| Ident::new(&name, Span::call_site()))
-        .ok_or(GeneratorError::NoNameForRootSchema)?;
+}
 
-    let mut fields: Vec<(&String, &Schema)> = root_schema.properties.inner_iter().collect();
-    fields.sort_by(|a, b| String::cmp(a.0, b.0));
-    let fields = fields
-        .into_iter()
-        .map(|(original_field_name, schema)| -> Result<TokenStream> {
-            if schema.reference.is_some() {
-                todo!()
+struct StructGenerator<'a> {
+    type_mapping: &'a TypeMapping,
+    processed_structs: Vec<String>,
+    queued_schemas: Vec<Schema>,
+}
+
+impl<'a> Iterator for StructGenerator<'a> {
+    type Item = Result<TokenStream>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.queued_schemas
+            .pop()
+            .map(|schema| self.next_struct(schema))
+    }
+}
+
+impl<'a> StructGenerator<'a> {
+    fn next_struct(&mut self, schema: Schema) -> Result<TokenStream> {
+        let name = struct_name(&schema)
+            .map(|name| Ident::new(&name, Span::call_site()))
+            .ok_or(GeneratorError::NoNameForRootSchema)?;
+
+        let schema_id = schema.get_id();
+
+        let docs = iter::empty()
+            .chain(schema_id)
+            .chain(schema.description.clone())
+            .map(|s| s.to_owned())
+            .map(|s| quote! {#[doc = #s]});
+
+        let mut fields = Vec::new();
+
+        let field_gen = FieldGenerator::new(schema, name.span(), self.type_mapping);
+
+        for result in field_gen {
+            let (field, requested_schema) = result?;
+            fields.push(field);
+            if let Some(requested_schema) = requested_schema {
+                if let Some(name) = struct_name(&requested_schema) {
+                    if !self.processed_structs.contains(&name) {
+                        self.queued_schemas.push(requested_schema);
+                    }
+                }
             }
+        }
 
-            let json_type = match schema.schema_type.clone().ok_or(
-                GeneratorError::PropertyMissingTypeForField(original_field_name.to_owned()),
-            )? {
+        self.processed_structs.push(name.to_string());
+
+        Ok(quote! {
+            #(#docs)*
+            struct #name {
+                #(#fields),*
+            }
+        })
+    }
+}
+
+struct FieldGenerator<'a> {
+    struct_span: Span,
+    parent_schema: Schema,
+    properties: Vec<(String, Schema)>,
+    type_mapping: &'a TypeMapping,
+}
+
+impl<'a> Iterator for FieldGenerator<'a> {
+    type Item = Result<(TokenStream, Option<Schema>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.properties
+            .pop()
+            .map(|(property_name, schema)| self.next_field(property_name, schema))
+    }
+}
+
+impl<'a> FieldGenerator<'a> {
+    fn new(mut schema: Schema, struct_span: Span, type_mapping: &'a TypeMapping) -> Self {
+        let mut properties = schema
+            .properties
+            .take()
+            .into_iter()
+            .flatten()
+            .collect::<Vec<(String, Schema)>>();
+
+        properties.sort_by(|a, b| String::cmp(&b.0, &a.0));
+
+        FieldGenerator {
+            struct_span,
+            parent_schema: schema,
+            properties,
+            type_mapping,
+        }
+    }
+
+    fn next_field(
+        &mut self,
+        property_name: String,
+        schema: Schema,
+    ) -> Result<(TokenStream, Option<Schema>)> {
+        if schema.reference.is_some() {
+            todo!()
+        }
+
+        let json_type =
+            match schema
+                .schema_type
+                .clone()
+                .ok_or(GeneratorError::PropertyMissingTypeForField(
+                    property_name.to_owned(),
+                ))? {
                 StringOrStringArray::String(value) => value,
                 StringOrStringArray::Array(_) => todo!(),
             };
 
-            let field_name = snake_case(original_field_name);
+        let field_name = snake_case(&property_name);
 
-            let field_type = match json_type.as_str() {
-                "array" => {
-                    let items =
-                        schema
-                            .items
-                            .clone()
-                            .ok_or(GeneratorError::ArrayDoesNotHaveSchema(
-                                original_field_name.to_owned(),
-                            ))?;
+        let field_type = match json_type.as_str() {
+            "array" => {
+                let items = schema
+                    .items
+                    .clone()
+                    .ok_or(GeneratorError::ArrayDoesNotHaveSchema(
+                        property_name.to_owned(),
+                    ))?;
 
-                    let schema = match items {
-                        BooleanOrSchema::Boolean(_) => Err(
-                            GeneratorError::ArrayDoesNotHaveSchema(original_field_name.to_owned()),
-                        )?,
-                        BooleanOrSchema::InnerSchema(schema) => schema,
-                    };
+                let schema = match items {
+                    BooleanOrSchema::Boolean(_) => Err(GeneratorError::ArrayDoesNotHaveSchema(
+                        property_name.to_owned(),
+                    ))?,
+                    BooleanOrSchema::InnerSchema(schema) => schema,
+                };
 
-                    let json_type = match schema.schema_type.clone().ok_or(
-                        GeneratorError::PropertyMissingTypeForField(original_field_name.to_owned()),
-                    )? {
-                        StringOrStringArray::String(value) => value,
-                        StringOrStringArray::Array(_) => todo!(),
-                    };
+                let json_type = match schema.schema_type.clone().ok_or(
+                    GeneratorError::PropertyMissingTypeForField(property_name.to_owned()),
+                )? {
+                    StringOrStringArray::String(value) => value,
+                    StringOrStringArray::Array(_) => todo!(),
+                };
 
-                    let inner_type = type_mapping.get(&json_type).ok_or(
-                        GeneratorError::NoTypeMappingFoundForField(original_field_name.to_owned()),
-                    )?;
+                let inner_type = self.type_mapping.get(&json_type).ok_or(
+                    GeneratorError::NoTypeMappingFoundForField(property_name.to_owned()),
+                )?;
 
-                    let inner_type = Ident::new(inner_type, name.span());
+                let inner_type = Ident::new(inner_type, self.struct_span);
 
-                    quote! {Vec<#inner_type>}
-                }
-                "null" => todo!(),
-                other => {
-                    let field_type = type_mapping.get(other).ok_or(
-                        GeneratorError::NoTypeMappingFoundForField(original_field_name.to_owned()),
-                    )?;
+                quote! {Vec<#inner_type>}
+            }
+            "null" => todo!(),
+            other => {
+                let field_type = self.type_mapping.get(other).ok_or(
+                    GeneratorError::NoTypeMappingFoundForField(property_name.to_owned()),
+                )?;
 
-                    let field_type = Ident::new(field_type, name.span());
-                    quote! {#field_type}
-                }
-            };
+                let field_type = Ident::new(field_type, self.struct_span);
+                quote! {#field_type}
+            }
+        };
 
-            let field_type = root_schema
-                .required
-                .inner_iter()
-                .find(|r| original_field_name == *r)
-                .map(|_| quote! {#field_type})
-                .unwrap_or(quote! {Option<#field_type>});
+        let field_type = self
+            .parent_schema
+            .required
+            .iter()
+            .flatten()
+            .find(|r| property_name == **r)
+            .map(|_| quote! {#field_type})
+            .unwrap_or(quote! {Option<#field_type>});
 
-            let field_name = Ident::new(&field_name, name.span());
+        let field_name = Ident::new(&field_name, self.struct_span);
+        let docs = schema.description.iter().map(|d| quote! {#[doc = #d]});
 
-            let docs = schema.description.iter().map(|d| quote! {#[doc = #d]});
-
-            let token_stream = quote! {
+        Ok((
+            quote! {
                 #(#docs)*
                 #field_name: #field_type
-            };
+            },
+            None,
+        ))
+    }
+}
 
-            Ok(token_stream)
-        })
-        .collect::<Result<Vec<TokenStream>>>()?;
+#[derive(Default)]
+pub struct Generator {
+    queued_schemas: Vec<Schema>,
+    type_mapping: TypeMapping,
+}
 
-    let docs = iter::empty()
-        .chain(root_schema.dollar_id.iter())
-        .chain(root_schema.id.iter())
-        .chain(root_schema.description.iter())
-        .map(|s| s.to_owned())
-        .map(|s| quote! {#[doc = #s]});
-
-    let file_contents = quote! {
-        #(#docs)*
-        struct #name {
-            #(#fields),*
+impl Generator {
+    pub fn new() -> Self {
+        Self {
+            queued_schemas: Vec::new(),
+            type_mapping: TypeMapping::with_basic_types(),
         }
-    };
+    }
 
-    let syntax_tree = syn::parse2(file_contents).unwrap();
-    let formatted = prettyplease::unparse(&syntax_tree);
+    pub fn single(mut self, schema: Schema) -> Self {
+        self.queued_schemas.push(schema);
+        self
+    }
 
-    Ok(formatted)
+    pub fn many(mut self, schemas: &mut Vec<Schema>) -> Self {
+        self.queued_schemas.append(schemas);
+        self
+    }
+
+    pub fn generate(&self, schema: Schema) -> Result<String> {
+        let struct_gen = StructGenerator {
+            processed_structs: Vec::new(),
+            queued_schemas: vec![schema],
+            type_mapping: &self.type_mapping,
+        };
+
+        let structs = struct_gen.collect::<Result<Vec<TokenStream>>>()?;
+
+        let module = quote! {
+                #(#structs),*
+        };
+
+        let syntax_tree = syn::parse2(module).unwrap();
+        let formatted = prettyplease::unparse(&syntax_tree);
+        Ok(formatted)
+    }
 }
 
 #[derive(Debug)]
@@ -185,15 +306,14 @@ impl Display for GeneratorError {
 }
 
 // https://json-schema.org/understanding-json-schema/reference/type
+#[derive(Default)]
 pub struct TypeMapping {
     types: HashMap<String, String>,
 }
 
 impl TypeMapping {
     fn empty() -> Self {
-        Self {
-            types: HashMap::new(),
-        }
+        TypeMapping::default()
     }
 
     pub fn with_basic_types() -> Self {
@@ -212,22 +332,6 @@ impl TypeMapping {
 
     pub fn get(&self, json_type: &str) -> Option<&String> {
         self.types.get(json_type)
-    }
-}
-
-pub trait InnerIterator<'a, R> {
-    fn inner_iter(&'a self) -> impl Iterator<Item = R>;
-}
-
-impl<'a, K, V> InnerIterator<'a, (&'a K, &'a V)> for Option<HashMap<K, V>> {
-    fn inner_iter(&'a self) -> impl Iterator<Item = (&'a K, &'a V)> {
-        self.iter().flat_map(|map| map.iter())
-    }
-}
-
-impl<'a, V> InnerIterator<'a, &'a V> for Option<Vec<V>> {
-    fn inner_iter(&'a self) -> impl Iterator<Item = &'a V> {
-        self.iter().flatten()
     }
 }
 
@@ -262,7 +366,7 @@ mod tests {
             }"##;
 
         let schema: Schema = serde_json::from_str(json_string).unwrap();
-        let result = generate(schema).unwrap();
+        let result = Generator::new().generate(schema).unwrap();
 
         let file_contents = quote! {
             ///https://example.com/person.schema.json
@@ -321,7 +425,7 @@ mod tests {
             }"##;
 
         let schema: Schema = serde_json::from_str(json_string).unwrap();
-        let result = generate(schema).unwrap();
+        let result = Generator::new().generate(schema).unwrap();
 
         let file_contents = quote! {
             ///https://example.com/address.schema.json
@@ -380,7 +484,7 @@ mod tests {
             }"##;
 
         let schema: Schema = serde_json::from_str(json_string).unwrap();
-        let result = generate(schema).unwrap();
+        let result = Generator::new().generate(schema).unwrap();
 
         let file_contents = quote! {
             ///https://example.com/user-profile.schema.json
@@ -434,16 +538,16 @@ mod tests {
             }"##;
 
         let schema: Schema = serde_json::from_str(json_string).unwrap();
-        let result = generate(schema).unwrap();
+        let result = Generator::new().generate(schema).unwrap();
 
         let file_contents = quote! {
             ///https://example.com/blog-post.schema.json
             ///A representation of a blog post
             struct BlogPost {
-                title: String,
+                author: crate::json_models::user_profile::UserProfile,
                 content: String,
-                author: String,
-                publishedDate: Option<String>,
+                published_date: Option<String>,
+                title: String,
                 tags: Option<Vec<String>>,
             }
         };
