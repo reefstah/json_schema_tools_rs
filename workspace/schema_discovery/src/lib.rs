@@ -22,7 +22,7 @@ impl SchemaDiscoverable for &Schema {
 
 pub struct DiscoveredSchema<'a> {
     id: String,
-    anchor: Option<String>,
+    root_schema_id: String,
     schema: &'a Schema,
 }
 
@@ -31,8 +31,19 @@ impl<'a> DiscoveredSchema<'a> {
         &self.id
     }
 
-    pub fn anchor(&self) -> Option<&str> {
-        self.anchor.as_deref()
+    pub fn root_schema_id(&self) -> &str {
+        &self.root_schema_id
+    }
+
+    pub fn anchor_id(&self) -> Option<String> {
+        match &self.schema.anchor {
+            Some(anchor) => {
+                let root_path = self.root_schema_id.clone();
+                let anchor = format!("{root_path}#{anchor}");
+                Some(anchor)
+            }
+            None => None,
+        }
     }
 
     pub fn schema(&self) -> &'a Schema {
@@ -70,17 +81,9 @@ impl<'a> SchemaDiscoverer<'a> {
 
 impl<'a> From<PathableSchema<'a>> for DiscoveredSchema<'a> {
     fn from(value: PathableSchema<'a>) -> Self {
-        let anchor = match &value.schema.anchor {
-            Some(anchor) => {
-                let root_path = value.root_path;
-                let anchor = format!("{root_path}#{anchor}");
-                Some(anchor)
-            }
-            None => None,
-        };
         DiscoveredSchema {
+            root_schema_id: value.root_path,
             id: value.path,
-            anchor,
             schema: value.schema,
         }
     }

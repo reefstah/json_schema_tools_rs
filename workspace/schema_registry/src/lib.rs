@@ -50,7 +50,7 @@ impl SchemaRegistry {
             schema.discover().map(|d| {
                 (
                     d.id().to_owned(),
-                    d.anchor().map(|s| s.to_owned()),
+                    d.anchor_id().map(|s| s.to_owned()),
                     d.schema().clone(),
                 )
             })
