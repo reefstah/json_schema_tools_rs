@@ -118,10 +118,10 @@ impl<'a> IntoIterator for PathableSchema<'a> {
 
     fn into_iter(self) -> Self::IntoIter {
         let schemas: Vec<PathableSchema<'a>> = iter::empty()
-            .chain(self.definitions())
             .chain(self.properties())
             .chain(self.dependent_schemas())
             .chain(self.pattern_properties())
+            .chain(self.definitions())
             .collect();
 
         schemas.into_iter()
