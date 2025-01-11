@@ -22,12 +22,17 @@ impl SchemaDiscoverable for &Schema {
 
 pub struct DiscoveredSchema<'a> {
     id: String,
+    anchor: Option<String>,
     schema: &'a Schema,
 }
 
 impl<'a> DiscoveredSchema<'a> {
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn anchor(&self) -> Option<&str> {
+        self.anchor.as_deref()
     }
 
     pub fn schema(&self) -> &'a Schema {
@@ -65,8 +70,17 @@ impl<'a> SchemaDiscoverer<'a> {
 
 impl<'a> From<PathableSchema<'a>> for DiscoveredSchema<'a> {
     fn from(value: PathableSchema<'a>) -> Self {
+        let anchor = match &value.schema.anchor {
+            Some(anchor) => {
+                let root_path = value.root_path;
+                let anchor = format!("{root_path}#{anchor}");
+                Some(anchor)
+            }
+            None => None,
+        };
         DiscoveredSchema {
             id: value.path,
+            anchor,
             schema: value.schema,
         }
     }
@@ -100,32 +114,11 @@ impl<'a> IntoIterator for PathableSchema<'a> {
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        if self.path.contains('#') {
-            return Vec::new().into_iter();
-        }
-
         let schemas: Vec<PathableSchema<'a>> = iter::empty()
             .chain(self.definitions())
             .chain(self.properties())
             .chain(self.dependent_schemas())
             .chain(self.pattern_properties())
-            .flat_map(|p| match &p.schema.anchor {
-                Some(anchor) => {
-                    let original = p.clone();
-                    let root_path = p.root_path;
-                    let path = format!("{root_path}#{anchor}");
-
-                    vec![
-                        original,
-                        PathableSchema {
-                            root_path,
-                            path,
-                            schema: p.schema,
-                        },
-                    ]
-                }
-                None => Vec::new(),
-            })
             .collect();
 
         schemas.into_iter()
@@ -138,17 +131,20 @@ impl<'a> PathableSchema<'a> {
             .definitions
             .iter()
             .flat_map(|map| map.iter())
-            .map(|(key, schema)| {
-                let root_path = match &schema.id {
-                    Some(id) => id.to_string(),
-                    None => self.root_path.clone(),
-                };
-
-                let path = format!("{root_path}/{DEFINITIONS_PATH}/{key}");
-                PathableSchema {
-                    root_path,
-                    path,
+            .map(|(key, schema)| match &schema.get_id() {
+                Some(id) => PathableSchema {
+                    root_path: id.to_owned(),
+                    path: id.to_owned(),
                     schema,
+                },
+                None => {
+                    let root_path = self.root_path.clone();
+                    let path = format!("{root_path}#/{DEFINITIONS_PATH}/{key}");
+                    PathableSchema {
+                        root_path,
+                        path,
+                        schema,
+                    }
                 }
             })
     }
@@ -161,7 +157,11 @@ impl<'a> PathableSchema<'a> {
             .map({
                 let path = self.path.clone();
                 move |(key, schema)| {
-                    let path = format!("{path}/{PROPERTIES_PATH}/{key}");
+                    let path = match path.contains('#') {
+                        true => format!("{path}/{PROPERTIES_PATH}/{key}"),
+                        false => format!("{path}#/{PROPERTIES_PATH}/{key}"),
+                    };
+
                     PathableSchema {
                         root_path: self.root_path.clone(),
                         path,
@@ -179,7 +179,11 @@ impl<'a> PathableSchema<'a> {
             .map({
                 let path = self.path.clone();
                 move |(key, schema)| {
-                    let path = format!("{path}/{DEPENDENT_SCHEMAS_PATH}/{key}");
+                    let path = match path.contains('#') {
+                        true => format!("{path}/{DEPENDENT_SCHEMAS_PATH}/{key}"),
+                        false => format!("{path}#/{DEPENDENT_SCHEMAS_PATH}/{key}"),
+                    };
+
                     PathableSchema {
                         root_path: self.root_path.clone(),
                         path,
@@ -197,7 +201,11 @@ impl<'a> PathableSchema<'a> {
             .map({
                 let path = self.path.clone();
                 move |(key, schema)| {
-                    let path = format!("{path}/{PATTERN_PROPERTIES_PATH}/{key}");
+                    let path = match path.contains('#') {
+                        true => format!("{path}/{PATTERN_PROPERTIES_PATH}/{key}"),
+                        false => format!("{path}#/{PATTERN_PROPERTIES_PATH}/{key}"),
+                    };
+
                     PathableSchema {
                         root_path: self.root_path.clone(),
                         path,

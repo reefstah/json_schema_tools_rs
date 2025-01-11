@@ -47,17 +47,24 @@ impl SchemaRegistry {
 
     pub fn discover(mut self) -> Result<Self, SchemaRegistryDiscoveryError> {
         let iter = self.schemas.values().flat_map(|schema| {
-            schema
-                .discover()
-                .map(|d| (d.id().to_string(), d.schema().clone()))
+            schema.discover().map(|d| {
+                (
+                    d.id().to_owned(),
+                    d.anchor().map(|s| s.to_owned()),
+                    d.schema().clone(),
+                )
+            })
         });
 
-        for (id, schema) in iter {
+        for (id, anchor, schema) in iter {
             if self.schema_exists(&id) {
                 return Err(SchemaRegistryDiscoveryError::EncounteredDuplicateSchema);
             }
 
-            self.discovered_schemas.insert(id, schema);
+            self.discovered_schemas.insert(id, schema.clone());
+            if let Some(anchor) = anchor {
+                self.discovered_schemas.insert(anchor.to_owned(), schema);
+            }
         }
 
         Ok(self)
