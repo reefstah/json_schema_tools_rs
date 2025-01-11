@@ -8,12 +8,13 @@ use anyhow::Result;
 use proc_macro2::TokenStream;
 use proc_macro2::{Ident, Span};
 use quote::quote;
+use schema_discovery::{SchemaDiscoverable, SchemaDiscoverer};
 use serde_json_schema::StringOrStringArray;
 use serde_json_schema::{BooleanOrSchema, Schema};
 
-// TODO external schemas
 // TODO validation>?
-// TODO schema wrapper with name or derived name and use for de-duplicate generation
+// TODO schema wrapper with name or derived name
+// TODO generate from references instead of owned objects
 
 fn capatalize(s: &str) -> String {
     let mut chars = s.chars();
@@ -67,61 +68,78 @@ fn struct_name(schema: &Schema) -> Option<String> {
         .map(|name| upper_camel_case(&name))
 }
 
-struct StructGenerator<'a> {
+struct ModuleGenerator<'a> {
+    root_schema: Option<Schema>,
+    discover: SchemaDiscoverer<'a>,
     type_mapping: &'a TypeMapping,
-    processed_structs: Vec<String>,
-    queued_schemas: Vec<Schema>,
 }
 
-impl<'a> Iterator for StructGenerator<'a> {
+impl<'a> Iterator for ModuleGenerator<'a> {
     type Item = Result<TokenStream>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.queued_schemas
-            .pop()
-            .map(|schema| self.next_struct(schema))
+        match self.discover.next() {
+            Some(discovered_schema) => {
+                let root_schema_id = discovered_schema.root_schema_id().to_owned();
+
+                let root_schema = self
+                    .root_schema
+                    .as_ref()
+                    .filter(|schema| {
+                        schema.get_id().is_some() && schema.get_id().unwrap() == root_schema_id
+                    })
+                    .take()
+                    .map(|schema| schema.to_owned());
+
+                let same_root_iter = self
+                    .discover
+                    .by_ref()
+                    .take_while(|next| root_schema_id == next.root_schema_id());
+
+                let module = iter::once(discovered_schema)
+                    .chain(same_root_iter)
+                    .filter(|d| match &d.schema().schema_type {
+                        Some(StringOrStringArray::String(value)) => *value == "object".to_string(),
+                        _ => false,
+                    })
+                    .map(|discovered_schema| discovered_schema.schema().to_owned())
+                    .chain(root_schema)
+                    .map(|schema| to_struct(self.type_mapping, schema))
+                    .collect::<Result<TokenStream>>();
+
+                Some(module)
+            }
+            None => None,
+        }
     }
 }
 
-impl<'a> StructGenerator<'a> {
-    fn next_struct(&mut self, schema: Schema) -> Result<TokenStream> {
-        let name = struct_name(&schema)
-            .map(|name| Ident::new(&name, Span::call_site()))
-            .ok_or(GeneratorError::NoNameForRootSchema)?;
+fn to_struct(type_mapping: &TypeMapping, schema: Schema) -> Result<TokenStream> {
+    let name = struct_name(&schema)
+        .map(|name| Ident::new(&name, Span::call_site()))
+        .ok_or(GeneratorError::NoNameForRootSchema)?;
 
-        let schema_id = schema.get_id();
+    let schema_id = schema.get_id();
+    let docs = iter::empty()
+        .chain(schema_id)
+        .chain(schema.description.clone())
+        .map(|s| s.to_owned())
+        .map(|s| quote! {#[doc = #s]});
 
-        let docs = iter::empty()
-            .chain(schema_id)
-            .chain(schema.description.clone())
-            .map(|s| s.to_owned())
-            .map(|s| quote! {#[doc = #s]});
+    let mut fields = Vec::new();
+    let generator = FieldGenerator::new(schema, name.span(), type_mapping);
 
-        let mut fields = Vec::new();
-
-        let field_gen = FieldGenerator::new(schema, name.span(), self.type_mapping);
-
-        for result in field_gen {
-            let (field, requested_schema) = result?;
-            fields.push(field);
-            if let Some(requested_schema) = requested_schema {
-                if let Some(name) = struct_name(&requested_schema) {
-                    if !self.processed_structs.contains(&name) {
-                        self.queued_schemas.push(requested_schema);
-                    }
-                }
-            }
-        }
-
-        self.processed_structs.push(name.to_string());
-
-        Ok(quote! {
-            #(#docs)*
-            struct #name {
-                #(#fields),*
-            }
-        })
+    for result in generator {
+        let field = result?;
+        fields.push(field);
     }
+
+    Ok(quote! {
+        #(#docs)*
+        struct #name {
+            #(#fields),*
+        }
+    })
 }
 
 struct FieldGenerator<'a> {
@@ -132,7 +150,7 @@ struct FieldGenerator<'a> {
 }
 
 impl<'a> Iterator for FieldGenerator<'a> {
-    type Item = Result<(TokenStream, Option<Schema>)>;
+    type Item = Result<TokenStream>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.properties
@@ -160,11 +178,7 @@ impl<'a> FieldGenerator<'a> {
         }
     }
 
-    fn next_field(
-        &mut self,
-        property_name: String,
-        schema: Schema,
-    ) -> Result<(TokenStream, Option<Schema>)> {
+    fn next_field(&mut self, property_name: String, schema: Schema) -> Result<TokenStream> {
         if schema.reference.is_some() {
             todo!()
         }
@@ -236,13 +250,10 @@ impl<'a> FieldGenerator<'a> {
         let field_name = Ident::new(&field_name, self.struct_span);
         let docs = schema.description.iter().map(|d| quote! {#[doc = #d]});
 
-        Ok((
-            quote! {
-                #(#docs)*
-                #field_name: #field_type
-            },
-            None,
-        ))
+        Ok(quote! {
+            #(#docs)*
+            #field_name: #field_type
+        })
     }
 }
 
@@ -271,18 +282,13 @@ impl Generator {
     }
 
     pub fn generate(&self, schema: Schema) -> Result<String> {
-        let struct_gen = StructGenerator {
-            processed_structs: Vec::new(),
-            queued_schemas: vec![schema],
+        let mut generator = ModuleGenerator {
+            root_schema: Some(schema.clone()),
+            discover: schema.discover(),
             type_mapping: &self.type_mapping,
         };
 
-        let structs = struct_gen.collect::<Result<Vec<TokenStream>>>()?;
-
-        let module = quote! {
-                #(#structs),*
-        };
-
+        let module = generator.next().ok_or(GeneratorError::NoSchemasFound)??;
         let syntax_tree = syn::parse2(module).unwrap();
         let formatted = prettyplease::unparse(&syntax_tree);
         Ok(formatted)
@@ -291,6 +297,7 @@ impl Generator {
 
 #[derive(Debug)]
 pub enum GeneratorError {
+    NoSchemasFound,
     NoNameForRootSchema,
     PropertyMissingTypeForField(String),
     NoTypeMappingFoundForField(String),
@@ -300,8 +307,12 @@ pub enum GeneratorError {
 impl Error for GeneratorError {}
 
 impl Display for GeneratorError {
-    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSchemasFound => write!(f, "No schemas found"),
+            Self::NoNameForRootSchema => write!(f, "No name for root schema"),
+            _ => write!(f, "Smth else happend"),
+        }
     }
 }
 
