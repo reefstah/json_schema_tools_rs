@@ -1,3 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["serde_json_schema", "schema_discovery", "schema_registry", "generators/rust_model_generator"]
+members = [
+  "serde_json_schema",
+  "schema_discovery",
+  "schema_registry",
+  "model_generators/rust_serde_generator",
+]

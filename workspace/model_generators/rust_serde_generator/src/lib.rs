@@ -305,6 +305,7 @@ impl<'a> FieldGenerator<'a> {
 
         Ok(quote! {
             #(#docs)*
+            #[serde(rename = #property_name)]
             #field_name: #field_type
         })
     }
@@ -446,10 +447,13 @@ mod tests {
             ///https://example.com/person.schema.json
             struct Person {
                 ///Age in years which must be equal to or greater than zero.
+                #[serde(rename = "age")]
                 age: Option<i64>,
                 ///The person's first name.
+                #[serde(rename = "firstName")]
                 first_name: Option<String>,
                 ///The person's last name.
+                #[serde(rename = "lastName")]
                 last_name: Option<String>,
             }
         };
@@ -505,12 +509,19 @@ mod tests {
             ///https://example.com/address.schema.json
             ///An address similar to http://microformats.org/wiki/h-card
             struct Address {
+                #[serde(rename = "countryName")]
                 country_name: String,
+                #[serde(rename = "extendedAddress")]
                 extended_address: Option<String>,
+                #[serde(rename = "locality")]
                 locality: String,
+                #[serde(rename = "postOfficeBox")]
                 post_office_box: Option<String>,
+                #[serde(rename = "postalCode")]
                 postal_code: Option<String>,
+                #[serde(rename = "region")]
                 region: String,
+                #[serde(rename = "streetAddress")]
                 street_address: Option<String>,
             }
         };
@@ -564,11 +575,17 @@ mod tests {
             ///https://example.com/user-profile.schema.json
             ///A representation of a user profile
             struct UserProfile {
+                #[serde(rename = "age")]
                 age: Option<i64>,
+                #[serde(rename = "email")]
                 email: String,
+                #[serde(rename = "fullName")]
                 full_name: Option<String>,
+                #[serde(rename = "interests")]
                 interests: Option<Vec<String>>,
+                #[serde(rename = "location")]
                 location: Option<String>,
+                #[serde(rename = "username")]
                 username: String,
             }
         };
@@ -664,10 +681,15 @@ mod tests {
             ///A representation of a blog post
             struct BlogPost {
                 ///A representation of a user profile
+                #[serde(rename = "author")]
                 author: crate::serde_models::user_profile::UserProfile,
+                #[serde(rename = "content")]
                 content: String,
+                #[serde(rename = "publishedDate")]
                 published_date: Option<String>,
+                #[serde(rename = "tags")]
                 tags: Option<Vec<String>>,
+                #[serde(rename = "title")]
                 title: String,
             }
         };
