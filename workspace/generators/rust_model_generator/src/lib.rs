@@ -9,6 +9,7 @@ use proc_macro2::TokenStream;
 use proc_macro2::{Ident, Span};
 use quote::quote;
 use schema_discovery::{SchemaDiscoverable, SchemaDiscoverer};
+use schema_registry::SchemaRegistry;
 use serde_json_schema::StringOrStringArray;
 use serde_json_schema::{BooleanOrSchema, Schema};
 
@@ -49,7 +50,7 @@ fn snake_case(s: &str) -> String {
         })
         .collect::<String>();
 
-    first_letters + rest.as_str()
+    (first_letters + rest.as_str()).replace('-', "_")
 }
 
 fn upper_camel_case(s: &str) -> String {
@@ -72,6 +73,7 @@ struct ModuleGenerator<'a> {
     root_schema: Option<Schema>,
     discover: SchemaDiscoverer<'a>,
     type_mapping: &'a TypeMapping,
+    registry: &'a SchemaRegistry,
 }
 
 impl<'a> Iterator for ModuleGenerator<'a> {
@@ -86,10 +88,11 @@ impl<'a> Iterator for ModuleGenerator<'a> {
                     .root_schema
                     .as_ref()
                     .filter(|schema| {
+                        // FIXME unwrap here
                         schema.get_id().is_some() && schema.get_id().unwrap() == root_schema_id
                     })
                     .take()
-                    .map(|schema| schema.to_owned());
+                    .map(|schema| (schema.to_owned(), schema.get_id().unwrap()));
 
                 let same_root_iter = self
                     .discover
@@ -102,9 +105,16 @@ impl<'a> Iterator for ModuleGenerator<'a> {
                         Some(StringOrStringArray::String(value)) => *value == "object".to_string(),
                         _ => false,
                     })
-                    .map(|discovered_schema| discovered_schema.schema().to_owned())
+                    .map(|discovered_schema| {
+                        (
+                            discovered_schema.schema().to_owned(),
+                            discovered_schema.root_schema_id().to_owned(),
+                        )
+                    })
                     .chain(root_schema)
-                    .map(|schema| to_struct(self.type_mapping, schema))
+                    .map(|(schema, root_schema_id)| {
+                        to_struct(schema, root_schema_id, self.type_mapping, self.registry)
+                    })
                     .collect::<Result<TokenStream>>();
 
                 Some(module)
@@ -114,7 +124,12 @@ impl<'a> Iterator for ModuleGenerator<'a> {
     }
 }
 
-fn to_struct(type_mapping: &TypeMapping, schema: Schema) -> Result<TokenStream> {
+fn to_struct(
+    schema: Schema,
+    root_schema_id: String,
+    type_mapping: &TypeMapping,
+    registry: &SchemaRegistry,
+) -> Result<TokenStream> {
     let name = struct_name(&schema)
         .map(|name| Ident::new(&name, Span::call_site()))
         .ok_or(GeneratorError::NoNameForRootSchema)?;
@@ -127,7 +142,8 @@ fn to_struct(type_mapping: &TypeMapping, schema: Schema) -> Result<TokenStream> 
         .map(|s| quote! {#[doc = #s]});
 
     let mut fields = Vec::new();
-    let generator = FieldGenerator::new(schema, name.span(), type_mapping);
+    let generator =
+        FieldGenerator::new(schema, name.span(), root_schema_id, type_mapping, registry);
 
     for result in generator {
         let field = result?;
@@ -144,9 +160,11 @@ fn to_struct(type_mapping: &TypeMapping, schema: Schema) -> Result<TokenStream> 
 
 struct FieldGenerator<'a> {
     struct_span: Span,
-    parent_schema: Schema,
     properties: Vec<(String, Schema)>,
+    schema: Schema,
+    root_schema_id: String,
     type_mapping: &'a TypeMapping,
+    registry: &'a SchemaRegistry,
 }
 
 impl<'a> Iterator for FieldGenerator<'a> {
@@ -160,7 +178,13 @@ impl<'a> Iterator for FieldGenerator<'a> {
 }
 
 impl<'a> FieldGenerator<'a> {
-    fn new(mut schema: Schema, struct_span: Span, type_mapping: &'a TypeMapping) -> Self {
+    fn new(
+        mut schema: Schema,
+        struct_span: Span,
+        root_schema_id: String,
+        type_mapping: &'a TypeMapping,
+        registry: &'a SchemaRegistry,
+    ) -> Self {
         let mut properties = schema
             .properties
             .take()
@@ -172,16 +196,32 @@ impl<'a> FieldGenerator<'a> {
 
         FieldGenerator {
             struct_span,
-            parent_schema: schema,
             properties,
+            schema,
+            root_schema_id,
             type_mapping,
+            registry,
         }
     }
 
     fn next_field(&mut self, property_name: String, schema: Schema) -> Result<TokenStream> {
-        if schema.reference.is_some() {
-            todo!()
-        }
+        let (schema, root_schema_id) = match schema.reference {
+            Some(reference) => {
+                let reference_root = reference
+                    .split_once('#')
+                    .map(|r| r.0.to_owned())
+                    .unwrap_or(reference.clone());
+
+                let schema = self
+                    .registry
+                    .get(&reference)
+                    .ok_or(GeneratorError::UnresolvableReference(reference))?
+                    .to_owned();
+
+                (schema, reference_root)
+            }
+            None => (schema, self.root_schema_id.clone()),
+        };
 
         let json_type =
             match schema
@@ -197,6 +237,19 @@ impl<'a> FieldGenerator<'a> {
         let field_name = snake_case(&property_name);
 
         let field_type = match json_type.as_str() {
+            "object" => {
+                let field_type = struct_name(&schema)
+                    .ok_or(GeneratorError::NoNameForTypeofField(property_name.clone()))?;
+
+                let module_name = get_first_resource_from_url(&root_schema_id)
+                    .map(|resource_name| snake_case(&resource_name))
+                    .ok_or(GeneratorError::NoNameForRootSchema)?;
+
+                let field_type = Ident::new(&field_type, self.struct_span);
+                let module_name = Ident::new(&module_name, self.struct_span);
+
+                quote! {crate::serde_models::#module_name::#field_type}
+            }
             "array" => {
                 let items = schema
                     .items
@@ -239,7 +292,7 @@ impl<'a> FieldGenerator<'a> {
         };
 
         let field_type = self
-            .parent_schema
+            .schema
             .required
             .iter()
             .flatten()
@@ -261,6 +314,7 @@ impl<'a> FieldGenerator<'a> {
 pub struct Generator {
     queued_schemas: Vec<Schema>,
     type_mapping: TypeMapping,
+    registry: SchemaRegistry,
 }
 
 impl Generator {
@@ -268,7 +322,13 @@ impl Generator {
         Self {
             queued_schemas: Vec::new(),
             type_mapping: TypeMapping::with_basic_types(),
+            registry: SchemaRegistry::default(),
         }
+    }
+
+    pub fn schema_registry(mut self, registry: SchemaRegistry) -> Self {
+        self.registry = registry;
+        self
     }
 
     pub fn single(mut self, schema: Schema) -> Self {
@@ -286,6 +346,7 @@ impl Generator {
             root_schema: Some(schema.clone()),
             discover: schema.discover(),
             type_mapping: &self.type_mapping,
+            registry: &self.registry,
         };
 
         let module = generator.next().ok_or(GeneratorError::NoSchemasFound)??;
@@ -299,9 +360,11 @@ impl Generator {
 pub enum GeneratorError {
     NoSchemasFound,
     NoNameForRootSchema,
+    NoNameForTypeofField(String),
     PropertyMissingTypeForField(String),
     NoTypeMappingFoundForField(String),
     ArrayDoesNotHaveSchema(String),
+    UnresolvableReference(String),
 }
 
 impl Error for GeneratorError {}
@@ -519,7 +582,48 @@ mod tests {
     /// https://json-schema.org/learn/json-schema-examples#blog-post
     #[test]
     fn blog_post_example() {
-        let json_string = r##"{
+        let user_profile_json_string = r##"{
+                "$id": "https://example.com/user-profile.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "description": "A representation of a user profile",
+                "type": "object",
+                "required": ["username", "email"],
+                "properties": {
+                    "username": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "fullName": {
+                        "type": "string"
+                    },
+                    "age": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "location": {
+                        "type": "string"
+                    },
+                    "interests": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }"##;
+
+        let user_profile_schema: Schema = serde_json::from_str(user_profile_json_string).unwrap();
+
+        let registry = SchemaRegistry::new()
+            .add_internally_identified_schema(user_profile_schema)
+            .unwrap()
+            .discover()
+            .unwrap();
+
+        let blog_post_json_string = r##"{
                 "$id": "https://example.com/blog-post.schema.json",
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "description": "A representation of a blog post",
@@ -548,18 +652,23 @@ mod tests {
                 }
             }"##;
 
-        let schema: Schema = serde_json::from_str(json_string).unwrap();
-        let result = Generator::new().generate(schema).unwrap();
+        let blog_post_schema: Schema = serde_json::from_str(blog_post_json_string).unwrap();
+
+        let result = Generator::new()
+            .schema_registry(registry)
+            .generate(blog_post_schema)
+            .unwrap();
 
         let file_contents = quote! {
             ///https://example.com/blog-post.schema.json
             ///A representation of a blog post
             struct BlogPost {
-                author: crate::json_models::user_profile::UserProfile,
+                ///A representation of a user profile
+                author: crate::serde_models::user_profile::UserProfile,
                 content: String,
                 published_date: Option<String>,
-                title: String,
                 tags: Option<Vec<String>>,
+                title: String,
             }
         };
 
