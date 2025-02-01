@@ -1,3 +1,4 @@
+use core::panic;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
@@ -102,7 +103,7 @@ impl<'a> Iterator for ModuleGenerator<'a> {
                 let module = iter::once(discovered_schema)
                     .chain(same_root_iter)
                     .filter(|d| match &d.schema().schema_type {
-                        Some(StringOrStringArray::String(value)) => *value == "object".to_string(),
+                        Some(StringOrStringArray::String(value)) => *value == "object",
                         _ => false,
                     })
                     .map(|discovered_schema| {
@@ -272,13 +273,28 @@ impl<'a> FieldGenerator<'a> {
                     StringOrStringArray::Array(_) => todo!(),
                 };
 
-                let inner_type = self.type_mapping.get(&json_type).ok_or(
-                    GeneratorError::NoTypeMappingFoundForField(property_name.to_owned()),
-                )?;
+                // FIXME implement iterator for recursive behaviour
+                if json_type == "object" {
+                    let field_type = struct_name(&schema)
+                        .ok_or(GeneratorError::NoNameForTypeofField(property_name.clone()))?;
 
-                let inner_type = Ident::new(inner_type, self.struct_span);
+                    let module_name = get_first_resource_from_url(&root_schema_id)
+                        .map(|resource_name| snake_case(&resource_name))
+                        .ok_or(GeneratorError::NoNameForRootSchema)?;
 
-                quote! {Vec<#inner_type>}
+                    let field_type = Ident::new(&field_type, self.struct_span);
+                    let module_name = Ident::new(&module_name, self.struct_span);
+
+                    quote! {Vec<crate::serde_models::#module_name::#field_type>}
+                } else {
+                    let inner_type = self.type_mapping.get(&json_type).ok_or(
+                        GeneratorError::NoTypeMappingFoundForField(property_name.to_owned()),
+                    )?;
+
+                    let inner_type = Ident::new(inner_type, self.struct_span);
+
+                    quote! {Vec<#inner_type>}
+                }
             }
             "null" => todo!(),
             other => {
@@ -375,7 +391,19 @@ impl Display for GeneratorError {
         match self {
             Self::NoSchemasFound => write!(f, "No schemas found"),
             Self::NoNameForRootSchema => write!(f, "No name for root schema"),
-            _ => write!(f, "Smth else happend"),
+            Self::NoNameForTypeofField(field) => write!(f, "No name for type of field {}", field),
+            Self::PropertyMissingTypeForField(field) => {
+                write!(f, "Property missing type for field {}", field)
+            }
+            Self::NoTypeMappingFoundForField(field) => {
+                write!(f, "No type mapping found for field {}", field)
+            }
+            Self::ArrayDoesNotHaveSchema(field) => {
+                write!(f, "Array does not have schema {}", field)
+            }
+            Self::UnresolvableReference(field) => {
+                write!(f, "Reference {} is not resolvable", field)
+            }
         }
     }
 }
@@ -699,4 +727,81 @@ mod tests {
 
         assert_eq!(result, expected_result);
     }
+}
+
+/// https://json-schema.org/learn/miscellaneous-examples#arrays-of-things
+#[test]
+fn arrays_of_things_modified_example() {
+    let json_string = r##"{
+                "$id": "https://example.com/arrays.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "description": "Arrays of strings and objects",
+                "title": "Arrays",
+                "type": "object",
+                "properties": {
+                    "bowl": {
+                        "title": "Bowl",
+                        "type": "object",
+                        "properties": {
+                            "fruits": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "vegetables": {
+                                "type": "array",
+                                "items": { 
+                                    "title": "Veggie",
+                                    "type": "object",
+                                    "required": [ "veggieName", "veggieLike" ],
+                                    "properties": {
+                                        "veggieName": {
+                                            "type": "string",
+                                            "description": "The name of the vegetable."
+                                        },
+                                        "veggieLike": {
+                                            "type": "boolean",
+                                            "description": "Do I like this vegetable?"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }"##;
+
+    let schema: Schema = serde_json::from_str(json_string).unwrap();
+    let result = Generator::new().generate(schema).unwrap();
+
+    let file_contents = quote! {
+        struct Bowl {
+            #[serde(rename = "fruits")]
+            fruits: Option<Vec<String>>,
+            #[serde(rename = "vegetables")]
+            vegetables: Option<Vec<crate::serde_models::arrays::Veggie>>,
+        }
+
+        struct Veggie {
+            ///Do I like this vegetable?
+            #[serde(rename = "veggieLike")]
+            veggie_like: bool,
+            ///The name of the vegetable.
+            #[serde(rename = "veggieName")]
+            veggie_name: String,
+        }
+
+        ///https://example.com/arrays.schema.json
+        ///Arrays of strings and objects
+        struct Arrays {
+            #[serde(rename = "bowl")]
+            bowl: Option<crate::serde_models::arrays::Bowl>
+        }
+    };
+
+    let syntax_tree = syn::parse2(file_contents).unwrap();
+    let expected_result = prettyplease::unparse(&syntax_tree);
+
+    assert_eq!(result, expected_result);
 }
