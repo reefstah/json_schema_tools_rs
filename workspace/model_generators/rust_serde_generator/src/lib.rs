@@ -18,6 +18,7 @@ use serde_json_schema::{BooleanOrSchema, Schema};
 // TODO generate from references instead of owned objects
 // TODO attempt to order generated classes from parent to children
 // TODO replace reliance on titles for nested objects with property names instead
+// TODO allow for customisable module path
 
 fn capatalize(s: &str) -> String {
     let mut chars = s.chars();
