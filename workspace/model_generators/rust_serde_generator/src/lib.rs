@@ -251,7 +251,7 @@ impl<'a> FieldGenerator<'a> {
                 let field_type = Ident::new(&field_type, self.struct_span);
                 let module_name = Ident::new(&module_name, self.struct_span);
 
-                quote! {crate::serde_models::#module_name::#field_type}
+                quote! {crate::#module_name::#field_type}
             }
             "array" => {
                 let items = schema
@@ -287,7 +287,7 @@ impl<'a> FieldGenerator<'a> {
                     let field_type = Ident::new(&field_type, self.struct_span);
                     let module_name = Ident::new(&module_name, self.struct_span);
 
-                    quote! {Vec<crate::serde_models::#module_name::#field_type>}
+                    quote! {Vec<crate::#module_name::#field_type>}
                 } else {
                     let inner_type = self.type_mapping.get(&json_type).ok_or(
                         GeneratorError::NoTypeMappingFoundForField(property_name.to_owned()),
@@ -712,7 +712,7 @@ mod tests {
             pub struct BlogPost {
                 ///A representation of a user profile
                 #[serde(rename = "author")]
-                pub author: crate::serde_models::user_profile::UserProfile,
+                pub author: crate::user_profile::UserProfile,
                 #[serde(rename = "content")]
                 pub content: String,
                 #[serde(rename = "publishedDate")]
@@ -782,7 +782,7 @@ fn arrays_of_things_modified_example() {
             #[serde(rename = "fruits")]
             pub fruits: Option<Vec<String>>,
             #[serde(rename = "vegetables")]
-            pub vegetables: Option<Vec<crate::serde_models::arrays::Veggie>>,
+            pub vegetables: Option<Vec<crate::arrays::Veggie>>,
         }
 
         pub struct Veggie {
@@ -798,7 +798,7 @@ fn arrays_of_things_modified_example() {
         ///Arrays of strings and objects
         pub struct Arrays {
             #[serde(rename = "bowl")]
-            pub bowl: Option<crate::serde_models::arrays::Bowl>
+            pub bowl: Option<crate::arrays::Bowl>
         }
     };
 
