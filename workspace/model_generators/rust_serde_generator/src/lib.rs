@@ -1,4 +1,3 @@
-use core::panic;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
@@ -17,6 +16,7 @@ use serde_json_schema::{BooleanOrSchema, Schema};
 // TODO validation>?
 // TODO schema wrapper with name or derived name
 // TODO generate from references instead of owned objects
+// TODO attempt to order generated classes from parent to children
 
 fn capatalize(s: &str) -> String {
     let mut chars = s.chars();
@@ -153,7 +153,7 @@ fn to_struct(
 
     Ok(quote! {
         #(#docs)*
-        struct #name {
+        pub struct #name {
             #(#fields),*
         }
     })
@@ -322,7 +322,7 @@ impl<'a> FieldGenerator<'a> {
         Ok(quote! {
             #(#docs)*
             #[serde(rename = #property_name)]
-            #field_name: #field_type
+            pub #field_name: #field_type
         })
     }
 }
@@ -473,16 +473,16 @@ mod tests {
 
         let file_contents = quote! {
             ///https://example.com/person.schema.json
-            struct Person {
+            pub struct Person {
                 ///Age in years which must be equal to or greater than zero.
                 #[serde(rename = "age")]
-                age: Option<i64>,
+                pub age: Option<i64>,
                 ///The person's first name.
                 #[serde(rename = "firstName")]
-                first_name: Option<String>,
+                pub first_name: Option<String>,
                 ///The person's last name.
                 #[serde(rename = "lastName")]
-                last_name: Option<String>,
+                pub last_name: Option<String>,
             }
         };
 
@@ -536,21 +536,21 @@ mod tests {
         let file_contents = quote! {
             ///https://example.com/address.schema.json
             ///An address similar to http://microformats.org/wiki/h-card
-            struct Address {
+            pub struct Address {
                 #[serde(rename = "countryName")]
-                country_name: String,
+                pub country_name: String,
                 #[serde(rename = "extendedAddress")]
-                extended_address: Option<String>,
+                pub extended_address: Option<String>,
                 #[serde(rename = "locality")]
-                locality: String,
+                pub locality: String,
                 #[serde(rename = "postOfficeBox")]
-                post_office_box: Option<String>,
+                pub post_office_box: Option<String>,
                 #[serde(rename = "postalCode")]
-                postal_code: Option<String>,
+                pub postal_code: Option<String>,
                 #[serde(rename = "region")]
-                region: String,
+                pub region: String,
                 #[serde(rename = "streetAddress")]
-                street_address: Option<String>,
+                pub street_address: Option<String>,
             }
         };
 
@@ -602,19 +602,19 @@ mod tests {
         let file_contents = quote! {
             ///https://example.com/user-profile.schema.json
             ///A representation of a user profile
-            struct UserProfile {
+            pub struct UserProfile {
                 #[serde(rename = "age")]
-                age: Option<i64>,
+                pub age: Option<i64>,
                 #[serde(rename = "email")]
-                email: String,
+                pub email: String,
                 #[serde(rename = "fullName")]
-                full_name: Option<String>,
+                pub full_name: Option<String>,
                 #[serde(rename = "interests")]
-                interests: Option<Vec<String>>,
+                pub interests: Option<Vec<String>>,
                 #[serde(rename = "location")]
-                location: Option<String>,
+                pub location: Option<String>,
                 #[serde(rename = "username")]
-                username: String,
+                pub username: String,
             }
         };
 
@@ -707,18 +707,18 @@ mod tests {
         let file_contents = quote! {
             ///https://example.com/blog-post.schema.json
             ///A representation of a blog post
-            struct BlogPost {
+            pub struct BlogPost {
                 ///A representation of a user profile
                 #[serde(rename = "author")]
-                author: crate::serde_models::user_profile::UserProfile,
+                pub author: crate::serde_models::user_profile::UserProfile,
                 #[serde(rename = "content")]
-                content: String,
+                pub content: String,
                 #[serde(rename = "publishedDate")]
-                published_date: Option<String>,
+                pub published_date: Option<String>,
                 #[serde(rename = "tags")]
-                tags: Option<Vec<String>>,
+                pub tags: Option<Vec<String>>,
                 #[serde(rename = "title")]
-                title: String,
+                pub title: String,
             }
         };
 
@@ -776,27 +776,27 @@ fn arrays_of_things_modified_example() {
     let result = Generator::new().generate(schema).unwrap();
 
     let file_contents = quote! {
-        struct Bowl {
+        pub struct Bowl {
             #[serde(rename = "fruits")]
-            fruits: Option<Vec<String>>,
+            pub fruits: Option<Vec<String>>,
             #[serde(rename = "vegetables")]
-            vegetables: Option<Vec<crate::serde_models::arrays::Veggie>>,
+            pub vegetables: Option<Vec<crate::serde_models::arrays::Veggie>>,
         }
 
-        struct Veggie {
+        pub struct Veggie {
             ///Do I like this vegetable?
             #[serde(rename = "veggieLike")]
-            veggie_like: bool,
+            pub veggie_like: bool,
             ///The name of the vegetable.
             #[serde(rename = "veggieName")]
-            veggie_name: String,
+            pub veggie_name: String,
         }
 
         ///https://example.com/arrays.schema.json
         ///Arrays of strings and objects
-        struct Arrays {
+        pub struct Arrays {
             #[serde(rename = "bowl")]
-            bowl: Option<crate::serde_models::arrays::Bowl>
+            pub bowl: Option<crate::serde_models::arrays::Bowl>
         }
     };
 
