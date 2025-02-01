@@ -118,7 +118,14 @@ impl<'a> Iterator for ModuleGenerator<'a> {
                     .map(|(schema, root_schema_id)| {
                         to_struct(schema, root_schema_id, self.type_mapping, self.registry)
                     })
-                    .collect::<Result<TokenStream>>();
+                    .collect::<Result<TokenStream>>()
+                    .map(|structs| {
+                        quote! {
+                            use serde::{Serialize, Deserialize};
+
+                            #structs
+                        }
+                    });
 
                 Some(module)
             }
@@ -155,6 +162,7 @@ fn to_struct(
 
     Ok(quote! {
         #(#docs)*
+        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub struct #name {
             #(#fields),*
         }
@@ -474,7 +482,10 @@ mod tests {
         let result = Generator::new().generate(schema).unwrap();
 
         let file_contents = quote! {
+            use serde::{Serialize, Deserialize};
+
             ///https://example.com/person.schema.json
+            #[derive(Debug, Serialize, Deserialize)]
             pub struct Person {
                 ///Age in years which must be equal to or greater than zero.
                 #[serde(rename = "age")]
