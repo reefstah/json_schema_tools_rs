@@ -1,7 +1,8 @@
 use std::iter;
 
 use serde_json_schema::{
-    Schema, DEFINITIONS_PATH, DEPENDENT_SCHEMAS_PATH, PATTERN_PROPERTIES_PATH, PROPERTIES_PATH,
+    Schema, DEFINITIONS_PATH, DEPENDENT_SCHEMAS_PATH, ITEMS_PATH, PATTERN_PROPERTIES_PATH,
+    PROPERTIES_PATH,
 };
 
 pub trait SchemaDiscoverable {
@@ -54,6 +55,7 @@ impl<'a> DiscoveredSchema<'a> {
 pub struct SchemaDiscoverer<'a> {
     iter: std::vec::IntoIter<PathableSchema<'a>>,
     discovering: Option<std::vec::IntoIter<PathableSchema<'a>>>,
+    nested: Vec<std::vec::IntoIter<PathableSchema<'a>>>,
 }
 
 impl<'a> SchemaDiscoverer<'a> {
@@ -69,11 +71,13 @@ impl<'a> SchemaDiscoverer<'a> {
                 Self {
                     iter: pathable_schema.into_iter(),
                     discovering: None,
+                    nested: Vec::new(),
                 }
             }
             None => Self {
                 iter: Vec::new().into_iter(),
                 discovering: None,
+                nested: Vec::new(),
             },
         }
     }
@@ -93,9 +97,18 @@ impl<'a> Iterator for SchemaDiscoverer<'a> {
     type Item = DiscoveredSchema<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(iter) = &mut self.discovering {
-            if let Some(p) = iter.next() {
-                return Some(p.into());
+        loop {
+            if let Some(iter) = &mut self.discovering {
+                if let Some(p) = iter.next() {
+                    self.nested.push(p.clone().into_iter());
+                    return Some(p.into());
+                }
+            }
+
+            if let Some(iter) = self.nested.pop() {
+                self.discovering = Some(iter);
+            } else {
+                break;
             }
         }
 
@@ -119,6 +132,7 @@ impl<'a> IntoIterator for PathableSchema<'a> {
     fn into_iter(self) -> Self::IntoIter {
         let schemas: Vec<PathableSchema<'a>> = iter::empty()
             .chain(self.properties())
+            .chain(self.items())
             .chain(self.dependent_schemas())
             .chain(self.pattern_properties())
             .chain(self.definitions())
@@ -163,6 +177,31 @@ impl<'a> PathableSchema<'a> {
                     let path = match path.contains('#') {
                         true => format!("{path}/{PROPERTIES_PATH}/{key}"),
                         false => format!("{path}#/{PROPERTIES_PATH}/{key}"),
+                    };
+
+                    PathableSchema {
+                        root_path: self.root_path.clone(),
+                        path,
+                        schema,
+                    }
+                }
+            })
+    }
+
+    fn items(&self) -> impl Iterator<Item = PathableSchema<'a>> + '_ {
+        self.schema
+            .items
+            .iter()
+            .filter_map(|items| match items {
+                serde_json_schema::BooleanOrSchema::InnerSchema(schema) => Some(schema),
+                serde_json_schema::BooleanOrSchema::Boolean(_) => None,
+            })
+            .map({
+                let path = self.path.clone();
+                move |schema| {
+                    let path = match path.contains('#') {
+                        true => format!("{path}/{ITEMS_PATH}"),
+                        false => format!("{path}#/{ITEMS_PATH}"),
                     };
 
                     PathableSchema {

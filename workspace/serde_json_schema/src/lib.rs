@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFINITIONS_PATH: &str = "$defs";
 pub const PROPERTIES_PATH: &str = "properties";
+pub const ITEMS_PATH: &str = "items";
 pub const DEPENDENT_SCHEMAS_PATH: &str = "dependentSchemas";
 pub const PATTERN_PROPERTIES_PATH: &str = "patternProperties";
 
