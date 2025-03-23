@@ -10,7 +10,7 @@ use proc_macro2::{Ident, Span};
 use quote::quote;
 use schema_discovery::{SchemaDiscoverable, SchemaDiscoverer};
 use schema_registry::SchemaRegistry;
-use serde_json_schema::StringOrStringArray;
+use serde_json_schema::{AnyType, StringOrStringArray};
 use serde_json_schema::{BooleanOrSchema, Schema};
 
 // TODO validation>?
@@ -116,14 +116,19 @@ impl<'a> Iterator for ModuleGenerator<'a> {
                     })
                     .chain(root_schema)
                     .map(|(schema, root_schema_id)| {
-                        to_struct(schema, root_schema_id, self.type_mapping, self.registry)
+                        // TODO one_of the rule should match only one should be enforced
+                        if schema.one_of.is_some() {
+                            to_enum(schema, self.registry)
+                        } else {
+                            to_struct(schema, root_schema_id, self.type_mapping, self.registry)
+                        }
                     })
                     .collect::<Result<TokenStream>>()
-                    .map(|structs| {
+                    .map(|parts| {
                         quote! {
                             use serde::{Serialize, Deserialize};
 
-                            #structs
+                            #parts
                         }
                     });
 
@@ -151,20 +156,100 @@ fn to_struct(
         .map(|s| s.to_owned())
         .map(|s| quote! {#[doc = #s]});
 
-    let mut fields = Vec::new();
     let generator =
         FieldGenerator::new(schema, name.span(), root_schema_id, type_mapping, registry);
 
-    for result in generator {
-        let field = result?;
-        fields.push(field);
-    }
+    let fields = generator.collect::<Result<Vec<TokenStream>>>()?;
 
     Ok(quote! {
         #(#docs)*
         #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub struct #name {
             #(#fields),*
+        }
+    })
+}
+
+fn to_enum(parent_schema: Schema, registry: &SchemaRegistry) -> Result<TokenStream> {
+    let schemas = parent_schema
+        .one_of
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|schema| match &schema.reference {
+            Some(reference) => registry
+                .get(reference)
+                .ok_or(GeneratorError::NoSchemasFound),
+            None => Ok(schema),
+        })
+        .collect::<Result<Vec<&Schema>, GeneratorError>>()?;
+
+    let tag = parent_schema
+        .properties
+        .iter()
+        .flat_map(|map| map.keys())
+        .filter(|parent_property| {
+            schemas.iter().all(|schema| {
+                schema
+                    .properties
+                    .iter()
+                    .flat_map(|map| map.get(*parent_property))
+                    .filter(|value| matches!(&value.schema_const, Some(AnyType::String(_))))
+                    .last()
+                    .is_some()
+            })
+        })
+        .last()
+        .ok_or(GeneratorError::NoCommonConstantProperty)?;
+
+    let name = struct_name(&parent_schema)
+        .map(|name| Ident::new(&name, Span::call_site()))
+        .ok_or(GeneratorError::NoNameForParentSchema)?;
+
+    let schema_id = parent_schema.get_id();
+    let docs = iter::empty()
+        .chain(schema_id)
+        .chain(parent_schema.description.clone())
+        .map(|s| s.to_owned())
+        .map(|s| quote! {#[doc = #s]});
+
+    let enum_options = schemas
+        .iter()
+        .map(|subschema: &&Schema| {
+            let tag_name = subschema
+                .properties
+                .as_ref()
+                .expect("Already should've errored")
+                .get(tag)
+                .expect("Already should've errored")
+                .schema_const
+                .as_ref()
+                .expect("Already should've errored");
+
+            let tag_name = match tag_name {
+                AnyType::String(value) => Some(value),
+                _ => None,
+            }
+            .expect("Already should've errored");
+
+            struct_name(subschema)
+                .map(|name| Ident::new(&name, Span::call_site()))
+                .map(|name| {
+                    quote! {
+                        #[serde(rename = #tag_name)]
+                        #name(#name)
+                    }
+                })
+                .ok_or(GeneratorError::NoNameForSchema)
+        })
+        .collect::<Result<Vec<TokenStream>, GeneratorError>>()?;
+
+    Ok(quote! {
+        #(#docs)*
+        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[serde(tag = #tag)]
+        pub enum #name {
+            #(#enum_options),*
         }
     })
 }
@@ -383,10 +468,14 @@ impl Generator {
     }
 }
 
+// Change error to a string
 #[derive(Debug)]
 pub enum GeneratorError {
     NoSchemasFound,
+    NoNameForSchema,
     NoNameForRootSchema,
+    NoNameForParentSchema,
+    NoCommonConstantProperty,
     NoNameForTypeofField(String),
     PropertyMissingTypeForField(String),
     NoTypeMappingFoundForField(String),
@@ -413,6 +502,15 @@ impl Display for GeneratorError {
             }
             Self::UnresolvableReference(field) => {
                 write!(f, "Reference {} is not resolvable", field)
+            }
+            Self::NoNameForParentSchema => {
+                write!(f, "No name for parent schema")
+            }
+            Self::NoCommonConstantProperty => {
+                write!(f, "No common property for all models of oneOf")
+            }
+            Self::NoNameForSchema => {
+                write!(f, "Unable to name subschema")
             }
         }
     }
@@ -824,6 +922,106 @@ fn arrays_of_things_modified_example() {
         pub struct Arrays {
             #[serde(rename = "bowl")]
             pub bowl: Option<crate::arrays::Bowl>
+        }
+    };
+
+    let syntax_tree = syn::parse2(file_contents).unwrap();
+    let expected_result = prettyplease::unparse(&syntax_tree);
+
+    assert_eq!(result, expected_result);
+}
+
+/// https://json-schema.org/learn/json-schema-examples#device-type
+#[test]
+fn device_type_modified_example() {
+    let json_string = r##"{
+        "$id": "https://example.com/device.schema.json",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+            "deviceType": {
+                "type": "string"
+            }
+        },
+        "required": ["deviceType"],
+        "oneOf": [
+            {
+                "$ref": "https://example.com/smartphone.schema.json"
+            },
+            {
+                "$ref": "https://example.com/laptop.schema.json"
+            }
+        ],
+        "$defs": {
+            "smartphone": {
+                "$id": "https://example.com/smartphone.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "brand": {
+                        "type": "string"
+                    },
+                    "model": {
+                        "type": "string"
+                    },
+                    "screenSize": {
+                        "type": "number"
+                    },
+                    "deviceType": {
+                        "const": "smartphone"
+                    }
+                },
+                "required": ["brand", "model", "screenSize"]
+            },
+            "laptop": {
+                "$id": "https://example.com/laptop.schema.json",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "brand": {
+                        "type": "string"
+                    },
+                    "model": {
+                        "type": "string"
+                    },
+                    "processor": {
+                        "type": "string"
+                    },
+                    "ramSize": {
+                        "type": "number"
+                    },
+                    "deviceType": {
+                        "const": "laptop"
+                    }
+                },
+                "required": ["brand", "model", "processor", "ramSize"]
+            }
+        }
+    }"##;
+    let schema: Schema = serde_json::from_str(json_string).unwrap();
+
+    let registry = SchemaRegistry::new()
+        .add_internally_identified_schema(schema.clone())
+        .unwrap()
+        .discover()
+        .unwrap();
+
+    let result = Generator::new()
+        .schema_registry(registry)
+        .generate(schema)
+        .unwrap();
+
+    let file_contents = quote! {
+        use serde::{Serialize, Deserialize};
+
+        ///https://example.com/device.schema.json
+        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[serde(tag = "deviceType")]
+        pub enum Device {
+            #[serde(rename = "smartphone")]
+            Smartphone(Smartphone),
+            #[serde(rename = "laptop")]
+            Laptop(Laptop),
         }
     };
 
