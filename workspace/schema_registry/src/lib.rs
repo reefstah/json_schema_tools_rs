@@ -71,7 +71,7 @@ impl SchemaRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<&Schema> {
-        self.schemas.get(id)
+        self.schemas.get(id).or(self.discovered_schemas.get(id))
     }
 
     fn schema_exists(&self, id: &str) -> bool {
