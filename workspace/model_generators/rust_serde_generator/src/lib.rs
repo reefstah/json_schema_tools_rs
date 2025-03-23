@@ -116,7 +116,6 @@ impl<'a> Iterator for ModuleGenerator<'a> {
                     })
                     .chain(root_schema)
                     .map(|(schema, root_schema_id)| {
-                        // TODO one_of the rule should match only one should be enforced
                         if schema.one_of.is_some() {
                             to_enum(schema, self.registry)
                         } else {
