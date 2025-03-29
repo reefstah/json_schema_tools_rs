@@ -162,7 +162,7 @@ fn to_struct(
 
     Ok(quote! {
         #(#docs)*
-        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub struct #name {
             #(#fields),*
         }
@@ -245,7 +245,7 @@ fn to_enum(parent_schema: Schema, registry: &SchemaRegistry) -> Result<TokenStre
 
     Ok(quote! {
         #(#docs)*
-        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         #[serde(tag = #tag)]
         pub enum #name {
             #(#enum_options),*
@@ -582,7 +582,7 @@ mod tests {
             use serde::{Serialize, Deserialize};
 
             ///https://example.com/person.schema.json
-            #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
             pub struct Person {
                 ///Age in years which must be equal to or greater than zero.
                 #[serde(rename = "age")]
@@ -648,7 +648,7 @@ mod tests {
 
             ///https://example.com/address.schema.json
             ///An address similar to http://microformats.org/wiki/h-card
-            #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
             pub struct Address {
                 #[serde(rename = "countryName")]
                 pub country_name: String,
@@ -717,7 +717,7 @@ mod tests {
 
             ///https://example.com/user-profile.schema.json
             ///A representation of a user profile
-            #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
             pub struct UserProfile {
                 #[serde(rename = "age")]
                 pub age: Option<i64>,
@@ -825,7 +825,7 @@ mod tests {
 
             ///https://example.com/blog-post.schema.json
             ///A representation of a blog post
-            #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
             pub struct BlogPost {
                 ///A representation of a user profile
                 #[serde(rename = "author")]
@@ -897,7 +897,7 @@ fn arrays_of_things_modified_example() {
     let file_contents = quote! {
         use serde::{Serialize, Deserialize};
 
-        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub struct Bowl {
             #[serde(rename = "fruits")]
             pub fruits: Option<Vec<String>>,
@@ -905,7 +905,7 @@ fn arrays_of_things_modified_example() {
             pub vegetables: Option<Vec<crate::arrays::Veggie>>,
         }
 
-        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub struct Veggie {
             ///Do I like this vegetable?
             #[serde(rename = "veggieLike")]
@@ -917,7 +917,7 @@ fn arrays_of_things_modified_example() {
 
         ///https://example.com/arrays.schema.json
         ///Arrays of strings and objects
-        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub struct Arrays {
             #[serde(rename = "bowl")]
             pub bowl: Option<crate::arrays::Bowl>
@@ -1014,7 +1014,7 @@ fn device_type_modified_example() {
         use serde::{Serialize, Deserialize};
 
         ///https://example.com/device.schema.json
-        #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         #[serde(tag = "deviceType")]
         pub enum Device {
             #[serde(rename = "smartphone")]
