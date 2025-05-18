@@ -130,7 +130,7 @@ impl<'a> IntoIterator for PathableSchema<'a> {
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let schemas: Vec<PathableSchema<'a>> = iter::empty()
+        let mut schemas: Vec<PathableSchema<'a>> = iter::empty()
             .chain(self.properties())
             .chain(self.items())
             .chain(self.dependent_schemas())
@@ -138,6 +138,7 @@ impl<'a> IntoIterator for PathableSchema<'a> {
             .chain(self.definitions())
             .collect();
 
+        schemas.sort_by(|left, right| String::cmp(&left.path, &right.path));
         schemas.into_iter()
     }
 }
