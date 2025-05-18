@@ -529,7 +529,7 @@ impl TypeMapping {
     pub fn with_basic_types() -> Self {
         Self::empty()
             .add("string", "String")
-            .add("number", "f64")
+            .add("number", "i64")
             .add("integer", "i64")
             .add("boolean", "bool")
     }
