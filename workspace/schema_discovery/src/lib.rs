@@ -6,17 +6,17 @@ use serde_json_schema::{
 };
 
 pub trait SchemaDiscoverable {
-    fn discover(&self) -> SchemaDiscoverer;
+    fn discover(&self) -> SchemaDiscoverer<'_>;
 }
 
 impl SchemaDiscoverable for Schema {
-    fn discover(&self) -> SchemaDiscoverer {
+    fn discover(&self) -> SchemaDiscoverer<'_> {
         SchemaDiscoverer::new(self)
     }
 }
 
 impl SchemaDiscoverable for &Schema {
-    fn discover(&self) -> SchemaDiscoverer {
+    fn discover(&self) -> SchemaDiscoverer<'_> {
         SchemaDiscoverer::new(self)
     }
 }
